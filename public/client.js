@@ -3,7 +3,7 @@
   const $ = (id) => document.getElementById(id);
   const CELL = 30, TOP = 44;
   const BX = { L: 20, R: 20 + S.COLS * CELL + 60 };
-  const TEAMCOL = { L: '#4fa3ff', R: '#ff5d5d' };
+  const TEAMCOL = { L: '#c4923a', R: '#7a96aa' };
 
   let ws = null, you = null, code = null, lobby = null;
   let rejoinCode = null, retries = 0, retryTimer = null; // reconnect state (kept across retries)
@@ -432,9 +432,9 @@
   window.__ftdToasts = () => ({ cur: toastCur && toastCur.msg, queued: toastQ.map((x) => x.msg) }); // read-only hook for the smoke test
 
   // ---------- rendering ----------
-  // Static layers (grass, dirt trail along the current route, frame, portal, castle, tower pads) are cached per board
-  // in an offscreen canvas and only redrawn when that board's tower list changes. Per-frame work is drawImage of
-  // cached sprites plus a fixed-size particle pool (no per-frame allocations in the hot loops).
+  // Static layers (grass, path, frame, portal, castle, tower pads, team header and names) are cached per board
+  // in an offscreen canvas and only redrawn when that board's tower list, roster header, or DPR changes.
+  // Lives stay per-frame. Per-frame work is drawImage of cached sprites plus a fixed-size particle pool.
   const AR = window.ART;
   const W = 760, H = 660, BW = S.COLS * CELL, BH = S.ROWS * CELL, PADX = 12;
   let dpr = 1;
@@ -471,15 +471,25 @@
     while (guard++ < 400) { const n = S.nextCell(d, pc, pr); if (!n) break; pts.push([x0 + (n.c + 0.5) * CELL, (n.r + 0.5) * CELL]); pc = n.c; pr = n.r; }
     return pts;
   }
+  function boardHeadSig(b) {
+    const m = me();
+    const title = (b === 'L' ? 'LEFT' : 'RIGHT') + (m && m.team === b ? ' · you' : '');
+    return title + '|' + state.players.filter((p) => p.team === b).map((p) => p.name).join(' & ');
+  }
   function ensureBoard(b, pmap) {
-    const bc = boardCache[b], B = state.boards[b];
-    if (bc.ref === B.towers && bc.dpr === dpr) return bc.cv;
-    bc.ref = B.towers; bc.dpr = dpr;
-    const w = BW + PADX * 2, h = BH + PADX * 2;
+    const bc = boardCache[b], B = state.boards[b], head = boardHeadSig(b);
+    if (bc.ref === B.towers && bc.dpr === dpr && bc.head === head) return bc.cv;
+    bc.ref = B.towers; bc.dpr = dpr; bc.head = head;
+    const w = BW + PADX * 2, h = BH + PADX + TOP;
     bc.cv.width = w * dpr; bc.cv.height = h * dpr;
     const g = bc.cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
-    AR.drawFrame(g, PADX, PADX, BW, BH);
-    g.save(); g.translate(PADX, PADX); AR.rrect(g, 0, 0, BW, BH, 6); g.clip();
+    const title = (b === 'L' ? 'LEFT' : 'RIGHT') + (me() && me().team === b ? ' · you' : '');
+    headerText(title, PADX, 22, TEAMCOL[b], 'left', 17, g);
+    const names = state.players.filter((p) => p.team === b).map((p) => p.name).join(' & ');
+    g.font = `600 11px ${FONT}`; g.textAlign = 'left'; g.lineWidth = 3; g.strokeStyle = AR.OUT; g.fillStyle = '#f0e6d4';
+    g.strokeText(names, PADX, 34); g.fillText(names, PADX, 34);
+    AR.drawFrame(g, PADX, TOP, BW, BH);
+    g.save(); g.translate(PADX, TOP); AR.rrect(g, 0, 0, BW, BH, 6); g.clip();
     AR.drawGrass(g, BW, BH, CELL, b === 'L' ? 11 : 23);
     AR.drawPath(g, routePts(dists()[b], 0), CELL);
     AR.drawPortal(g, (S.SPAWN.c + 0.5) * CELL, (S.SPAWN.r + 0.5) * CELL, CELL);
@@ -611,8 +621,9 @@
     }
     ctx.globalAlpha = 1;
   }
-  function headerText(txt, x, y, col, align, size) {
-    ctx.font = `700 ${size || 16}px ${FONT}`; ctx.textAlign = align; ctx.lineWidth = 4; ctx.strokeStyle = AR.OUT; ctx.strokeText(txt, x, y); ctx.fillStyle = col; ctx.fillText(txt, x, y);
+  function headerText(txt, x, y, col, align, size, g) {
+    const c = g || ctx;
+    c.font = `700 ${size || 16}px ${FONT}`; c.textAlign = align; c.lineWidth = 4; c.strokeStyle = AR.OUT; c.strokeText(txt, x, y); c.fillStyle = col; c.fillText(txt, x, y);
   }
   const hpSeen = new Map(); // creep id -> { hp, hit (time of last damage), gen }
   let hpGen = 0;
@@ -640,19 +651,15 @@
     const pmap = new Map(state.players.map((p) => [p.id, p]));
     const d = dists();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (!bgGrad) { bgGrad = ctx.createLinearGradient(0, 0, 0, H); bgGrad.addColorStop(0, '#5fc1f5'); bgGrad.addColorStop(0.6, '#8fdcff'); bgGrad.addColorStop(1, '#b6ec8d'); }
+    if (!bgGrad) { bgGrad = ctx.createLinearGradient(0, 0, 0, H); bgGrad.addColorStop(0, '#1c1410'); bgGrad.addColorStop(0.6, '#2a2018'); bgGrad.addColorStop(1, '#1a1814'); }
     ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, W, H);
     for (const b of ['L', 'R']) {
       const B = state.boards[b], x0 = BX[b];
-      // header
-      headerText(`${b === 'L' ? 'LEFT' : 'RIGHT'}${m && m.team === b ? ' · you' : ''}`, x0, 22, TEAMCOL[b], 'left', 17);
+      // cached static board (includes team label + names); lives stay per-frame
+      const bcv = ensureBoard(b, pmap);
+      ctx.drawImage(bcv, x0 - PADX, 0, BW + PADX * 2, BH + PADX + TOP);
       const hs = AR.heart(); ctx.drawImage(hs.c, x0 + BW - 56, 8, hs.w, hs.h);
       headerText(String(B.lives), x0 + BW, 22, B.leak ? '#ff6b6b' : '#ffffff', 'right', 18);
-      ctx.font = `600 11px ${FONT}`; ctx.textAlign = 'left'; ctx.fillStyle = '#1d3b52';
-      ctx.fillText(state.players.filter((p) => p.team === b).map((p) => p.name).join(' & '), x0, 34);
-      // cached static board
-      const bcv = ensureBoard(b, pmap);
-      ctx.drawImage(bcv, x0 - PADX, TOP - PADX, BW + PADX * 2, BH + PADX * 2);
       if (B.leak) {
         const lx = x0 + (S.BASE.c + 0.5) * CELL, ly = TOP + (S.BASE.r + 0.5) * CELL;
         const lg = ctx.createRadialGradient(lx, ly, 8, lx, ly, CELL * 5.5);
