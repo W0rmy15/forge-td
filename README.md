@@ -1,4 +1,4 @@
-# Forge TD v0.5.1 — online versus tower defense (1v1 / 2v2)
+# Forge TD v0.5.2 — online versus tower defense (1v1 / 2v2)
 
 A top-down, browser-based **versus tower defense** game. Two teams (Left vs Right), 1–2 players each.
 Teammates share one maze and defend together; you spend gold to **send creeps** at the other team,
@@ -92,7 +92,8 @@ Sent creeps follow the neutral wave HP curve. In 2v2 they get ×1.5 HP up to wav
 ×2.99 (= 2.3 team scale × 1.3 two-attacker bonus) at wave 16. On top of that an early-game ramp (×0.26 at wave 1 rising
 to ×1 at wave 14) means a rush can't flatten a defense before it exists.
 In 2v2 a send's defender bounty is multiplied by the same 2v2 multiplier as its HP (defenders earn the same gold per HP as
-in 1v1), and the income a send gives its sender is ×0.75 (`SEND_TEAM2_INCOME`, `SEND_TEAM2_BOUNTY` in shared.js).
+in 1v1), and the income a send (or a send-tier purchase) gives its sender is ×0.70 (`SEND_TEAM2_INCOME`, `SEND_TEAM2_BOUNTY`,
+`SEND_TEAM2_UPINCOME` in shared.js).
 The income you gain per send shrinks as your send income grows (`income × 120 / (120 + income already gained from sends)`).
 Sends are unlimited (there is no per-wave cap), but each enemy board has a single send lane: every send occupies it for
 its lane time, so banked gold dumped at once trickles in. To protect the server, a send is refused with **"Lane full"**
@@ -153,7 +154,7 @@ npm run test:sim                              # in-process rule checks: queued s
 node test/juggle.js                           # sell/rebuild juggling regression (v0.5)
 node test/wirebytes.js                        # state message size v0.4 vs v0.5 encoding + decode round trip
 node test/tune.js [variant]                   # balance variant sweep (QA's tune4 rows; ~1 min per variant)
-node test/tune51.js [variant|all]             # v0.5.1 sweep: 2v2 income/bounty (A+B) and T3 Runner speed variants
+node test/tune51.js [variant|all] [seeds] [mirror]  # 2v2 income/bounty variants; 'mirror' plays both seatings
 npm run test:matrix                           # send-vs-defense matrix incl. 'bank and dump' senders and upgraders (~1 min)
 npm test                                      # bots + maze + exploit + v0.3 checks (takeover, join errors, proxy headers, queued sale)
 node test/bots.js ws://localhost:8080 4 60    # 4 bots (2v2) join, start, build, upgrade, sell, send for 60 s

@@ -133,7 +133,7 @@ function upgradeSend(room, p, kind) {
   if (g.wave < S.SEND_UP.UNLOCK_WAVE[tier + 1]) return `Tier ${tier + 1} unlocks at wave ${S.SEND_UP.UNLOCK_WAVE[tier + 1]}`;
   if (!Number.isFinite(cost) || p.gold < cost) return 'Not enough gold';
   addGold(p, -cost);
-  sendIncomeGain(p, cost * S.SEND_UP.INCOME_PER_GOLD); // an upgrade is an investment too (same falloff as sends)
+  sendIncomeGain(p, cost * S.SEND_UP.INCOME_PER_GOLD * S.sendUpIncomeMult(g.teamSize)); // an upgrade is an investment too (same falloff as sends; 2v2 x SEND_TEAM2_INCOME)
   p.sendTier[kind] = tier + 1;
   p.sendUpSpent = (p.sendUpSpent || 0) + cost;
   g.events.push({ k: 'sendup', team: p.team, kind, tier: tier + 1, name: p.name, id: p.id });

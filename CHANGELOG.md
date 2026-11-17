@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.2 — 2026-11-17
+
+2v2 economy follow-up from the v0.5.1 QA review. No client or protocol changes.
+
+- **2v2 send income ×0.70** (`SEND_TEAM2_INCOME`, was 0.75).
+- **Send-tier income is scaled the same way in 2v2** (`SEND_TEAM2_UPINCOME`). In v0.5.1, buying a tier still paid
+  unscaled income (`cost × INCOME_PER_GOLD`) in 2v2. The multiplier is 1 in 1v1.
+- **1v1 is unchanged:** all 62 1v1 rows in `test/matrix.js` and all 22 in `test/balance.js` are byte-identical to v0.5.1.
+- **Results:** `node test/tune51.js V52 5 mirror`, wins out of 10 across both seatings, which cancels the harness's
+  Left-acts-first bias.
+  - 2v2 U runner60 vs D+Da / Dx2 / U20x2 / E20x2: 2 / 2 / 8 / 2 (v0.5.1: 10 / 10 / 10 / 4).
+  - U swarm60 and U mix40 lose everywhere. E40 vs E20 is 4/10 and U20 vs E20 is 2/10.
+  - 2v2 E40 and E20 senders still beat pure defense 10/10 at 12.8–14.3 min. 2v2 D vs D is 5/10.
+  - `test/matrix.js` shows 0 sender wins under 8 min.
+- `test/tune51.js` gains a `mirror` mode and the `V52` variant. New `test/sim.js` checks cover send-tier income in
+  1v1 vs 2v2.
+
 ## 0.5.1 — 2026-11-16
 
 Core balance from the v0.5 QA review (QA fix A+B for 2v2 heavy senders). No client or protocol changes.

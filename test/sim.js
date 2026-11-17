@@ -142,6 +142,15 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
     check(`${n}v${n}: send income gain ${wantInc} and bounty ${wantB}`, Math.abs(p.income + p.incomeFrac - inc0 - wantInc) < 1e-9 && q.bounty === wantB, { gain: +(p.income + p.incomeFrac - inc0).toFixed(3), bounty: q.bounty });
   }
 }
+// --- v0.5.2: send-tier income x SEND_TEAM2_INCOME in 2v2, unscaled in 1v1 ---
+{
+  for (const n of [1, 2]) {
+    const room = mkRoom(n), g = room.game, p = room.players.get(1); p.gold = 1e6; g.wave = 8;
+    const inc0 = p.income + p.incomeFrac, cost = S.sendUpCost('brute', 0); G.upgradeSend(room, p, 'brute');
+    const want = cost * S.SEND_UP.INCOME_PER_GOLD * (n >= 2 ? S.SEND_TEAM2_INCOME : 1);
+    check(`${n}v${n}: send-tier income gain ${+want.toFixed(4)}`, Math.abs(p.income + p.incomeFrac - inc0 - want) < 1e-9, { gain: +(p.income + p.incomeFrac - inc0).toFixed(4) });
+  }
+}
 // --- v0.4: send upgrades ---
 {
   const room = mkRoom(), g = room.game, p = room.players.get(1); p.gold = 1e6; g.wave = 1;
