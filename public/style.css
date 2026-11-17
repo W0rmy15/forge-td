@@ -164,3 +164,9 @@ button.danger{background:linear-gradient(#c45830,#8a2818);color:#fff}
 .sbtn.lanefull{opacity:.55;filter:saturate(.65)}
 .laneov{position:absolute;left:0;right:0;top:4px;pointer-events:none;text-align:center;font-size:11px;font-weight:700;color:#ffc44a;-webkit-text-stroke:2.5px var(--out);paint-order:stroke fill;z-index:2;line-height:1.2}
 .laneov[hidden]{display:none!important}
+
+/* sound controls — compact hammered-metal, matches the side panel */
+#audCtrl{align-items:center;gap:6px;margin:0 0 4px}
+#muteBtn{padding:2px 8px;min-width:36px;font-size:14px;line-height:1.2;border-radius:8px;box-shadow:0 2px 0 var(--out)}
+#muteBtn[aria-pressed="true"]{background:linear-gradient(#4a3530,#2c201c);color:#ffc44a}
+#volSlider{flex:1;accent-color:#ff8a20;height:16px;background:transparent}
