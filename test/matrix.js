@@ -17,6 +17,12 @@ rows.push(['1v1 E40 vs E20', [E(0.4)], [E(0.2)]], ['1v1 D vs D', [D()], [D()]]);
 for (const f of [0.2, 0.4, 0.6, 0.8]) rows.push([`2v2 mix${f * 100}x2 vs Dx2`, [E(f), E(f)], [D(), D('arrow')]]);
 for (const k of ['runner', 'swarm', 'brute']) for (const f of [0.4, 0.6]) rows.push([`2v2 ${k}${f * 100}x2 vs Dx2`, [E(f, k), E(f, k)], [D(), D('arrow')]]);
 rows.push(['2v2 E40+D vs Dx2', [E(0.4), D()], [D(), D('arrow')]], ['2v2 E40 vs E20', [E(0.4), E(0.4)], [E(0.2), E(0.2)]], ['2v2 D vs D', [D(), D('arrow')], [D(), D('arrow')]]);
+// v0.4 send upgraders: U(f) spends the same non-defense share f as E(f), split 65% sends / 35% send-tier upgrades
+const U = (f, k = 'mix') => ({ tower: 'mix', send: +(f * 0.65).toFixed(3), kind: k, need: 'mid', up: 3, upFrac: +(f * 0.35).toFixed(3), upWave: 6 });
+for (const k of ['mix', 'runner', 'swarm', 'brute']) for (const f of [0.2, 0.4, 0.6, 0.8]) rows.push([`1v1 U ${k}${f * 100} vs D`, [U(f, k)], [D()]]);
+rows.push(['1v1 U brute40 vs D(arrow)', [U(0.4, 'brute')], [D('arrow')]], ['1v1 U20 vs E20', [U(0.2)], [E(0.2)]], ['1v1 U40 vs E20', [U(0.4)], [E(0.2)]], ['1v1 U20 vs U20', [U(0.2)], [U(0.2)]]);
+for (const k of ['mix', 'runner', 'swarm', 'brute']) for (const f of [0.2, 0.4, 0.6]) rows.push([`2v2 U ${k}${f * 100}x2 vs Dx2`, [U(f, k), U(f, k)], [D(), D('arrow')]]);
+rows.push(['2v2 U20 vs E20', [U(0.2), U(0.2)], [E(0.2), E(0.2)]], ['2v2 U40 vs E20', [U(0.4), U(0.4)], [E(0.2), E(0.2)]], ['2v2 U20 vs U20', [U(0.2), U(0.2)], [U(0.2), U(0.2)]], ['2v2 U40+D vs Dx2', [U(0.4), D()], [D(), D('arrow')]]);
 let fast = 0;
 for (const [l, a, b] of rows) {
   if (filter && !l.includes(filter)) continue;
@@ -28,6 +34,6 @@ for (const [l, a, b] of rows) {
     if (r.winner === 'L' && r.min < 8 && a.some((x) => x.send > 0)) fast++;
   }
   const w = { L: 0, R: 0, draw: 0, timeout: 0 }; rs.forEach((r) => w[r.winner]++);
-  console.log(`${l.padEnd(24)} L ${w.L} R ${w.R} d ${w.draw}${w.timeout ? ' t' + w.timeout : ''} | min ${rs.map((r) => r.min).join(',')} | lives ${rs.map((r) => r.lives.join('/')).join(' ')} | preSD lost L/R ${rs.map((r) => r.pre.L + '/' + r.pre.R).join(' ')} | inc ${rs[0].inc}`);
+  console.log(`${l.padEnd(24)} L ${w.L} R ${w.R} d ${w.draw}${w.timeout ? ' t' + w.timeout : ''} | min ${rs.map((r) => r.min).join(',')} | lives ${rs.map((r) => r.lives.join('/')).join(' ')} | preSD lost L/R ${rs.map((r) => r.pre.L + '/' + r.pre.R).join(' ')} | inc ${rs[0].inc}${/[1-9]/.test(rs[0].tiers) ? ' | tiers ' + rs.map((r) => r.tiers).join(' ') : ''}`);
 }
 console.log(`sender wins under 8 min: ${fast}`);

@@ -120,7 +120,7 @@ function boardsMsg(room, full) {
     const b = g.boards[t];
     const o = {
       lives: b.lives, leak: b.leakFlash > 0 ? 1 : 0, tv: b.towerVer, busy: G.boardBusy(g, b) ? 1 : 0, // busy = sales are queued (same rule as the server)
-      creeps: b.creeps.map((c) => [c.id, c.kind, +c.x.toFixed(2), +c.y.toFixed(2), Math.ceil(c.hp), c.maxHp, g.time < c.slowUntil ? 1 : 0, c.radius]),
+      creeps: b.creeps.map((c) => [c.id, c.kind, +c.x.toFixed(2), +c.y.toFixed(2), Math.ceil(c.hp), c.maxHp, g.time < c.slowUntil ? 1 : 0, c.radius, c.v || 0]),
       queued: b.queue.length, queuedSends: b.queue.reduce((n, q) => n + (q.from ? 1 : 0), 0),
     };
     if (full || room.sentTv[t] !== b.towerVer) {
@@ -130,9 +130,10 @@ function boardsMsg(room, full) {
   }
   return out;
 }
+function tiersOf(p) { const o = {}; for (const k of Object.keys(S.SENDS)) o[k] = G.tierOf(p, k); return o; }
 function playersFor(room, team) {
   return [...room.players.values()].map((p) => {
-    const o = { id: p.id, name: p.name, team: p.team, income: p.income, color: p.color, cursor: p.cursor, connected: p.connected, sent: p.sent, kills: p.kills };
+    const o = { id: p.id, name: p.name, team: p.team, income: p.income, color: p.color, cursor: p.cursor, connected: p.connected, sent: p.sent, kills: p.kills, tiers: tiersOf(p) }; // send tiers are public (defenders must read incoming threats)
     if (p.team === team || room.phase === 'over') { o.gold = Math.floor(p.gold); }
     return o;
   });
@@ -249,6 +250,10 @@ function handle(ws, msg) {
   }
   if (room.phase !== 'game') return;
   // test-only: corrupt the game state so the next tick throws (enabled only with FORGE_TEST_HOOKS=1)
+  // test-only: top up gold for screenshot/perf scripts (enabled only with FORGE_TEST_HOOKS=1)
+  if (msg.t === 'debug_gold' && process.env.FORGE_TEST_HOOKS === '1') { G.addGold(p, 5000); return; }
+  // test-only: jump the wave counter forward (so smoke tests can reach send-tier unlocks quickly)
+  if (msg.t === 'debug_wave' && process.env.FORGE_TEST_HOOKS === '1') { const n = Math.floor(+msg.wave); if (Number.isFinite(n) && n > room.game.wave && n < 40) room.game.wave = n; return; }
   if (msg.t === 'debug_crash' && process.env.FORGE_TEST_HOOKS === '1') { room.game.boards.L.towers.set('0,0', { c: 0, r: 0, type: 'bogus', lvl: 0, cd: 0, sellAt: null }); return; }
   let err = null;
   switch (msg.t) {
@@ -265,6 +270,9 @@ function handle(ws, msg) {
     case 'send':
       if (!S.hasSend(msg.kind)) return send(ws, { t: 'err', msg: 'Unknown send' });
       err = G.doSend(room, p, msg.kind); break;
+    case 'sendup':
+      if (!S.hasSend(msg.kind)) return send(ws, { t: 'err', msg: 'Unknown send' });
+      err = G.upgradeSend(room, p, msg.kind); break;
     default: return;
   }
   if (err) send(ws, { t: 'err', msg: err });
@@ -292,15 +300,20 @@ function take(b, rate, burst) {
 }
 
 // Per-IP limits key on the socket address. Proxy headers can be forged by any client, so they are only
-// trusted when TRUST_PROXY is set (e.g. on Render, behind Cloudflare): then CF-Connecting-IP, True-Client-IP,
-// or the last X-Forwarded-For hop (the one appended by the proxy) is used.
+// trusted when told to:
+//   TRUST_PROXY=1 -> the LAST X-Forwarded-For hop (the one appended by the proxy in front of us).
+//   TRUST_CF=1    -> CF-Connecting-IP / True-Client-IP first. Only set this when the edge really is Cloudflare
+//                    (Cloudflare overwrites/rejects client-supplied values; any other edge passes them through).
 const TRUST_PROXY = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY || '');
+const TRUST_CF = /^(1|true|yes)$/i.test(process.env.TRUST_CF || '');
 function clientIp(req) {
-  if (TRUST_PROXY) {
-    const h = req.headers;
+  const h = req.headers;
+  if (TRUST_CF) {
     for (const k of ['cf-connecting-ip', 'true-client-ip']) {
       if (typeof h[k] === 'string' && h[k].trim()) return h[k].trim();
     }
+  }
+  if (TRUST_PROXY || TRUST_CF) {
     const xf = h['x-forwarded-for'];
     if (typeof xf === 'string' && xf.trim()) {
       const parts = xf.split(',').map((x) => x.trim()).filter(Boolean);
@@ -372,4 +385,4 @@ setInterval(() => {
 }, 15000);
 
 process.on('uncaughtException', (e) => logOnce('uncaught:' + (e && e.message), 'UNCAUGHT ' + (e.stack || e)));
-server.listen(PORT, () => log(`Forge TD v${S.VERSION} listening on http://localhost:${PORT}${TRUST_PROXY ? ' (TRUST_PROXY on)' : ''}${SPEED > 1 ? ` (SPEED=${SPEED}, testing only)` : ''}`));
+server.listen(PORT, () => log(`Forge TD v${S.VERSION} listening on http://localhost:${PORT}${TRUST_PROXY ? ' (TRUST_PROXY on)' : ''}${TRUST_CF ? ' (TRUST_CF on)' : ''}${SPEED > 1 ? ` (SPEED=${SPEED}, testing only)` : ''}`));

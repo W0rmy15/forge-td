@@ -1,5 +1,84 @@
 # Changelog
 
+## 0.4.0 — 2026-11-16
+
+New cartoon look, upgradable sends, and the v0.3 QA findings (proxy headers, lane limit, sale wait, T10 balance base).
+
+### Graphics (all procedural, no image assets)
+- New `public/art.js` draws every sprite in code with thick dark outlines and soft shadows. Sprites are cached per size
+  at 3× supersampling.
+  - The board is grass with a dirt trail along the current path (chevrons show the direction), a portal and a castle.
+  - Tower pads are round bases in the owner's colour, with level stars.
+  - **Arrow** is an archer whose hood colour, quiver and cape change with level. **Cannon** is a chunky cannon that
+    gets bigger, with bands and a fuse. **Frost** is a snowman with a scarf, hat or crown and an ice wand.
+    Archers and cannons turn to face their target and recoil when they fire.
+  - Creeps are round, bouncy balloon blobs with faces. Neutral waves cycle through balloon colours; bosses have horns.
+    Runner, Swarm and Brute each have their own colour and gear by tier: bronze, silver or gold rings, helmets,
+    spikes and crowns.
+- Effects come from a fixed pool of 900 particles, so there's no per-frame garbage:
+  - pop stars and confetti on kills, plus a floating +gold for your own kills
+  - arrow and ice-shard projectiles with trails, and cannonballs on an arc
+  - muzzle flash, splash puffs and rings, frost rings (throttled per tower so busy boards stay readable)
+  - white hit flashes, an ice overlay on slowed creeps, and a −♥ on leaks.
+- Static board layers are drawn once to an offscreen canvas and redrawn only when towers change. The canvas is sharp on
+  HiDPI screens. In the screenshot run (2v2, wave 17, 100 towers, about 180 creeps, about 600–800 live particles,
+  headless Chrome) one frame took 2.3 ms on average and 12–13 ms at most.
+- Readability is kept: animated dashed range circles, HP bars, path preview, a build ghost with a red ✕ when blocked,
+  a 💲 coin on towers queued for sale, and the sudden-death banner.
+- New UI: chunky 3D buttons and cream cards, a sky/hill background, an animated scene on the menu, a VS lobby, tower
+  and send buttons with sprite icons, and the bundled **Fredoka** font (SIL OFL, `public/fonts/`, no CDN).
+
+### Send upgrades
+- Each player can buy tiers 1–3 for Runner, Brute and Swarm (`Shift+Q/W/E` or the ⬆ buttons). Tiers last the whole
+  match. Tier 1 unlocks at wave 8, tier 2 at wave 12, tier 3 at wave 16.
+- Upgrade price is ×2 / ×3.5 / ×5.5 the send's base price.
+- Effects by tier:
+  - HP ×1.2 / 1.5 / 1.85.
+  - Send price and income ×1.1 / 1.2 / 1.3.
+  - Defender bounty grows with HP.
+  - Runner gets +20% / +35% speed. Brute gets armour (−40% / −50% Arrow damage), and tier 3 halves the slow.
+    Swarm sends 6 / 7 creeps.
+- Buying a tier also adds a little income (5% of the price, with the send falloff).
+- The server checks everything: kind via own-property lookup, tier map without a prototype, stored tier clamped,
+  unlock wave, finite cost, enough gold, max tier, and no upgrades during the final wave. Messages use the normal rate limits.
+- Tiers are public. Both teams see them in the roster and in a new **Enemy send tiers** panel, and get toasts when
+  anyone upgrades. Sent creeps carry their tier, so the enemy sees what is coming.
+
+### QA findings from v0.3
+- **Proxy headers:** `CF-Connecting-IP` and `True-Client-IP` are trusted only with `TRUST_CF=1`. With `TRUST_PROXY=1`
+  alone, the per-IP key is the last `X-Forwarded-For` hop. `render.yaml` now sets `TRUST_CF=1`; existing Render
+  services need it added in the dashboard.
+- **Lane limit:** a send is refused with "Lane full" (no charge, and a toast tells you why) when the enemy lane is
+  already booked more than 45 s ahead. This protects the server; there is still no per-wave cap.
+- Sudden-death HP and leak multipliers apply when a sent creep **spawns**, not when it was sent.
+- **Queued sales:** after 10 s a queued sale goes through as soon as no creep is within 3 cells of the tower. A steady
+  trickle of sends can no longer lock towers in place. QA's `juggle.js`, re-run against v0.4, gets at most 3 flips per
+  wave at 15g per flip, with no real gain in creep time on the board.
+- The send tooltip reads the full-strength wave from the constants (wave 14) instead of saying "before wave 10".
+
+### Balance (QA T10 base, then retuned with upgrader bots)
+- Send HP ×wave HP: Runner 2.1, Swarm 0.9, Brute 10.5. Brute bounty is 24 (QA's fallback). In 1v1, brute20 beat
+  runner20 at 6.3 min without it.
+- 2v2 neutral waves ×2.0 at wave 1, easing to ×2.3 by wave 14.
+- 2v2 send HP ×1.8 up to wave 6, rising to ×2.99 (2.3 × 1.3) by wave 16. With the full ×2.99 from the start, 2v2
+  bank-and-dump bots beat two defenders at about 4.3 min in 11 matrix rows.
+- `test/balance.js` and `test/matrix.js` have upgrader bots: U(f) spends the same share as E(f), split 65% sends and
+  35% tiers. Results are in the 0.4.0 report.
+
+### Tests
+- `test/sim.js` covers:
+  - lane limit, no charge on refusal, and the lane freeing up again
+  - sudden-death multipliers applied at spawn
+  - sale max wait, including the creep-nearby case
+  - send-tier validation (prototype keys, unlock waves, gold, max tier, clamping) and per-tier specs
+  - armour and slow resist.
+- `test/exploits.js` sends junk and prototype-name `sendup` kinds.
+- `test/v03.js` has modes for `trustproxy` (forged CF headers are ignored) and `trustcf`.
+- `test/smoke.js` checks locked upgrade buttons, the Shift+Q refusal reason and the enemy tiers panel. With
+  `FORGE_TEST_HOOKS=1` it also buys a real tier and checks that the enemy sees it and that a T1 Runner spawns.
+- New `test/shots.js` takes screenshots plus frame-time stats.
+- New test-only hooks `debug_gold` and `debug_wave`, which work only with `FORGE_TEST_HOOKS=1`.
+
 ## 0.3.0 — 2026-11-16
 
 Fixes from the v0.2 QA re-review, a balance pass based on the reviewer's tested "V7" tuning, and unlimited sends.

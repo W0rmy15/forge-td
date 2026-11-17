@@ -86,6 +86,34 @@ let fails = 0; const check = (n, ok, info) => { console.log(`${ok ? 'PASS' : 'FA
     const selTxt = await A.$eval('#sel', (e) => e.textContent).catch(() => '');
     const flagged = await A.evaluate(() => { const t = window.__ftdState().boards.L.towers.find((t) => t[1] === 0 && t[2] === 12); return t ? t[6] : null; });
     check('sale queued: panel says so, tower still on board', /Sale queued/.test(selTxt) && flagged === 1, { selTxt: selTxt.slice(0, 120), flagged }); }
+  // send upgrades (v0.4): locked before the unlock wave, Shift+Q refused with a reason, enemy tiers panel
+  { const upTxt = await A.$eval('#sendBtns', (e) => e.textContent);
+    check('send upgrade buttons show locked tier 1 before wave 8', /🔒 T1 @ wave 8/.test(upTxt), upTxt.replace(/\s+/g, ' ').slice(0, 160));
+    await A.keyboard.down('Shift'); await A.keyboard.press('Q'); await A.keyboard.up('Shift'); await sleep(500);
+    const tt = await A.evaluate(() => [document.getElementById('toast').textContent, ...window.__ftdToasts().queued].join(' | '));
+    check('Shift+Q before unlock is refused by the server with a reason', /unlocks at wave 8/.test(tt), tt);
+    const et = await B.$eval('#enemyTiers', (e) => e.textContent);
+    check('enemy send tiers panel lists the opponent', /Alice/.test(et), et);
+    // with FORGE_TEST_HOOKS=1, jump to wave 8 and buy a real tier
+    const g0 = +(await A.$eval('#gold', (e) => e.textContent));
+    await A.evaluate(() => { const s = window.__sockets[window.__sockets.length - 1]; s.send(JSON.stringify({ t: 'debug_gold' })); s.send(JSON.stringify({ t: 'debug_wave', wave: 8 })); }); await sleep(600);
+    const g1 = +(await A.$eval('#gold', (e) => e.textContent));
+    if (g1 - g0 < 4000) console.log('SKIP  send-tier purchase flow (server not started with FORGE_TEST_HOOKS=1)');
+    else {
+      const u = await A.$eval('#sendBtns', (e) => e.textContent);
+      check('upgrade button unlocked at wave 8 with its price', /⬆ T1 · 70g/.test(u), u.replace(/\s+/g, ' ').slice(0, 160));
+      await A.keyboard.down('Shift'); await A.keyboard.press('Q'); await A.keyboard.up('Shift'); await sleep(600);
+      const tier = await A.evaluate(() => window.__ftdState().players.find((p) => p.name === 'Alice').tiers.runner);
+      const t2 = await A.evaluate(() => [document.getElementById('toast').textContent, ...window.__ftdToasts().queued].join(' | '));
+      check('Shift+Q buys Runner tier 1 (server state + toast)', tier === 1 && /upgraded to tier 1/.test(t2), { tier, t2 });
+      const bt = await B.evaluate(() => ({ seen: window.__ftdState().players.find((p) => p.name === 'Alice').tiers.runner, html: document.getElementById('enemyTiers').innerHTML }));
+      check('enemy sees the new tier (state + badge)', bt.seen === 1 && /<b>1<\/b>/.test(bt.html), bt.seen);
+      await A.keyboard.press('q'); await sleep(500);
+      const t3 = await A.evaluate(() => [document.getElementById('toast').textContent, ...window.__ftdToasts().queued].join(' | '));
+      check('next send is tier 1 ("Sent T1 Runner")', /Sent T1 Runner/.test(t3), t3);
+      const ct = await B.evaluate(async () => { for (let i = 0; i < 60; i++) { const c = window.__ftdState().boards.R.creeps.find((c) => c[1] === 'runner' && c[8] === 1); if (c) return c[8]; await new Promise((r) => setTimeout(r, 100)); } return null; });
+      check('tier-1 runner spawns on the enemy board', ct === 1, ct);
+    } }
   await A.screenshot({ path: require('path').join(require('os').tmpdir(), 'forge-smoke.png') });
   // room-not-found: page with stale token for a missing room goes back to the menu
   const C = await mk(); await C.goto(URL_); await C.evaluate(() => localStorage.setItem('ftd_token_ZZZZ', 'x'));

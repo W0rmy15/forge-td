@@ -4,31 +4,35 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Forge TD — Versus Tower Defense</title>
+<link rel="preload" href="fonts/Fredoka.ttf" as="font" type="font/ttf" crossorigin>
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="data:,">
 </head>
 <body>
+<div id="sky"><div class="cloud c1"></div><div class="cloud c2"></div><div class="cloud c3"></div><div class="hills"></div></div>
 <div id="menu" class="screen">
-  <h1>⚔️ Forge TD</h1>
+  <h1 class="logo"><span class="l1">Forge</span><span class="l2">TD</span></h1>
   <p class="sub">Online versus tower defense · 1v1 or 2v2</p>
+  <canvas id="menuArt" width="460" height="150"></canvas>
   <div class="card">
     <label>Your name <input id="name" maxlength="16" placeholder="Player"></label>
-    <button id="createBtn" class="big">Create room</button>
-    <div class="row"><input id="codeInput" maxlength="4" placeholder="CODE" style="text-transform:uppercase;width:90px"><button id="joinBtn">Join room</button></div>
+    <button id="createBtn" class="big go">Create room</button>
+    <div class="row"><input id="codeInput" maxlength="4" placeholder="CODE" style="text-transform:uppercase;width:110px"><button id="joinBtn" class="big blue">Join room</button></div>
     <div id="menuErr" class="err"></div>
   </div>
 </div>
 
 <div id="lobby" class="screen hidden">
-  <h1>Room <span id="lobbyCode"></span></h1>
-  <div class="share">Invite link: <input id="shareLink" readonly onclick="this.select()"> <button id="copyBtn">Copy</button></div>
+  <h1 class="logo small"><span class="l1">Room</span> <span id="lobbyCode" class="l2"></span></h1>
+  <div class="share card row">Invite link: <input id="shareLink" readonly onclick="this.select()"> <button id="copyBtn" class="blue">Copy</button></div>
   <div class="teams">
-    <div class="team L"><h2>🔵 Left team</h2><ul id="teamL"></ul><button data-team="L" class="teamBtn">Join Left</button></div>
-    <div class="team R"><h2>🔴 Right team</h2><ul id="teamR"></ul><button data-team="R" class="teamBtn">Join Right</button></div>
+    <div class="team L"><h2>🔵 Left team</h2><ul id="teamL"></ul><button data-team="L" class="teamBtn blue">Join Left</button></div>
+    <div class="vs">VS</div>
+    <div class="team R"><h2>🔴 Right team</h2><ul id="teamR"></ul><button data-team="R" class="teamBtn red">Join Right</button></div>
   </div>
-  <div class="row center"><button id="readyBtn" class="big">Ready</button><button id="startBtn" class="big hidden">Start game</button></div>
+  <div class="row center"><button id="readyBtn" class="big go">Ready</button><button id="startBtn" class="big go hidden">Start game</button></div>
   <div id="lobbyErr" class="err"></div>
-  <p class="hint">1v1 or 2v2 (teams must be even). Teammates share a maze and defend together. The host starts when everyone is ready.</p>
+  <p class="hint card">1v1 or 2v2 (teams must be even). Teammates share a maze and defend together. The host starts when everyone is ready.</p>
 </div>
 
 <div id="game" class="screen hidden">
@@ -36,28 +40,33 @@
   <div class="gamewrap">
     <canvas id="cv" width="760" height="660"></canvas>
     <div id="panel">
-      <div class="stat"><span>💰 Gold</span><b id="gold">0</b></div>
-      <div class="stat"><span>📈 Income</span><b id="income">0</b></div>
-      <div class="stat small"><span>Next income</span><b id="nextIncome">0</b></div>
-      <div class="stat small"><span>Wave <b id="wave">0</b> · next in</span><b id="nextWave">0</b></div>
+      <div class="stats">
+        <div class="stat gold"><span>Gold</span><b id="gold">0</b></div>
+        <div class="stat inc"><span>Income</span><b id="income">0</b></div>
+        <div class="stat small"><span>Next income</span><b id="nextIncome">0</b></div>
+        <div class="stat small"><span>Wave <b id="wave">0</b> · next</span><b id="nextWave">0</b></div>
+      </div>
       <h3>Build <small>(click your side)</small></h3>
       <div id="buildBtns" class="btns"></div>
-      <h3>Send creeps <small>(+income)</small></h3>
-      <div id="sendBtns" class="btns"></div>
+      <h3>Send creeps <small>(+income) · Shift = upgrade</small></h3>
+      <div id="sendBtns" class="btns sends"></div>
       <div class="stat small"><span>Your team's sends queued at enemy</span><b id="sendsQueued">0</b></div>
       <div class="stat small"><span>Enemy sends queued at you</span><b id="sendsOnMe">0</b></div>
+      <h3>Enemy send tiers</h3>
+      <div id="enemyTiers"></div>
       <div id="sel" class="sel hidden"></div>
       <h3>Players</h3>
       <div id="roster"></div>
       <div id="chatLog"></div>
       <input id="chatInput" placeholder="Enter to chat" maxlength="120">
-      <p class="hint">Keys: 1/2/3 tower · Q/W/E send · U upgrade · X twice to sell (queued while creeps are on your board) · Esc cancel</p>
+      <p class="hint">Keys: 1/2/3 tower · Q/W/E send · Shift+Q/W/E upgrade send · U upgrade tower · X twice to sell (queued while creeps are on your board) · Esc cancel</p>
     </div>
   </div>
-  <div id="over" class="overlay hidden"><div class="card"><h1 id="overText"></h1><p id="overReason" class="hint"></p><div id="overStats"></div><button id="backBtn" class="big hidden">Back to lobby</button><p id="overWait" class="hint">Waiting for host…</p></div></div>
+  <div id="over" class="overlay hidden"><div class="card"><h1 id="overText"></h1><p id="overReason" class="hint"></p><div id="overStats"></div><button id="backBtn" class="big go hidden">Back to lobby</button><p id="overWait" class="hint">Waiting for host…</p></div></div>
 </div>
 <div id="toast"></div>
 <script src="shared.js"></script>
+<script src="art.js"></script>
 <script src="client.js"></script>
 </body>
 </html>
