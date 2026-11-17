@@ -705,12 +705,31 @@
             ctx.drawImage(sp.c, px - w / 2, py - lift - h / 2 + (sp.h - h) * 0.3, w, h);
             if (hitK) { const f = AR.creepFlash(R); ctx.globalAlpha = 0.85 * hitK; ctx.drawImage(f.c, px - f.w * hitSq / 2, py - lift - f.h / 2, f.w * hitSq, f.h); ctx.globalAlpha = 1; }
             if (cr[6]) { const ic = AR.creepIce(R); ctx.drawImage(ic.c, px - ic.w / 2, py - lift - ic.h / 2, ic.w, ic.h); }
-          } else if (cr[4] < cr[5]) {
-            const w = Math.max(16, R * 2.1), y = py - lift - R - 8, f = Math.max(0, cr[4] / cr[5]);
-            ctx.fillStyle = AR.OUT; ctx.fillRect(px - w / 2 - 1.5, y - 1.5, w + 3, 7);
-            ctx.fillStyle = '#5a1a2a'; ctx.fillRect(px - w / 2, y, w, 4);
-            ctx.fillStyle = f > 0.5 ? '#4ce06a' : f > 0.25 ? '#ffd23a' : '#ff4d4d'; ctx.fillRect(px - w / 2, y, w * f, 4);
-            ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(px - w / 2, y, w * f, 1.2);
+          }
+        }
+        // pass 2: one shared HP bar per stack, only on damaged creeps.
+        // Light background, dark outline, 4 px, length-only fill (no HP-color coding).
+        if (pass === 2) {
+          const stacks = new Map();
+          for (let i = 0; i < creeps.length; i++) {
+            const cr = creeps[i]; if (cr[4] >= cr[5]) continue;
+            const p = prev.get(cr[0]);
+            let cx = cr[2], cy = cr[3];
+            if (p) { cx = p[2] + (cr[2] - p[2]) * alpha; cy = p[3] + (cr[3] - p[3]) * alpha; }
+            const kind = cr[1], R = AR.creepR(kind, cr[7], CELL);
+            const ph = now * (kind === 'runner' ? 0.02 : kind === 'brute' || kind === 'boss' ? 0.008 : 0.013) + cr[0] * 1.7;
+            const lift = Math.abs(Math.sin(ph)) * R * 0.34, f = Math.max(0, cr[4] / cr[5]);
+            const key = Math.round(cx * 8) + ':' + Math.round(cy * 8);
+            let st = stacks.get(key);
+            const px = x0 + cx * CELL, py = TOP + cy * CELL;
+            if (!st) stacks.set(key, { px, py, lift, R, f });
+            else { st.f = Math.min(st.f, f); if (R > st.R) st.R = R; if (lift > st.lift) st.lift = lift; }
+          }
+          for (const st of stacks.values()) {
+            const w = Math.max(16, st.R * 2.1), y = st.py - st.lift - st.R - 8;
+            ctx.fillStyle = AR.OUT; ctx.fillRect(st.px - w / 2 - 1, y - 1, w + 2, 6);
+            ctx.fillStyle = '#f0e6d4'; ctx.fillRect(st.px - w / 2, y, w, 4);
+            ctx.fillStyle = '#c42818'; ctx.fillRect(st.px - w / 2, y, w * st.f, 4);
           }
         }
       }
