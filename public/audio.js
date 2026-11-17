@@ -22,6 +22,8 @@
   var noiseBufs = Object.create(null);
   var load = 0, cheapMode = false, thinN = 0, nodeCount = 0;
   var BUCKET_RATE = 28, BUCKET_BURST = 12, tokens = 12, tokenAt = 0;
+  var emaMs = 16.7, lastRaf = 0, longStreak = 0, goodStreak = 0, lagging = false, lagUntil = 0;
+  var frameGen = 0, rafOn = false, lastPlayFrame = -1, playsThisFrame = 0;
 
   // Inharmonic metal partials (not a harmonic series — sounds like struck iron, not a bell copy).
   var METAL = [1, 1.34, 1.77, 2.21, 2.92, 3.61, 4.45, 5.43];
@@ -69,6 +71,8 @@
     limiter.release.value = 0.12;
     master.connect(limiter);
     limiter.connect(ctx.destination);
+    // Build looping noise once on unlock so a play never allocates a long buffer mid-frame.
+    noiseBuffer('white'); noiseBuffer('pink'); noiseBuffer('brown');
   }
 
   function unlock() {
@@ -97,6 +101,46 @@
     for (var i = 0; i < evs.length; i++) target.addEventListener(evs[i], once, true);
   }
   safe(attachUnlock);
+  safe(startRafWatch);
+
+  // Frame-time watch: EMA of rAF deltas, ignoring hidden tabs and tab-switch gaps.
+  // Enter lagging (cheap) when EMA > 20 ms or 3 frames in a row exceed 33 ms; leave after
+  // a stretch of good frames (hysteresis) so a single hitch doesn't flap the mode.
+  function startRafWatch() {
+    if (rafOn || !root.requestAnimationFrame) return;
+    rafOn = true;
+    var raf = root.requestAnimationFrame;
+    var loop = function (ts) {
+      try { raf(loop); } catch (e) { rafOn = false; return; }
+      frameGen++;
+      var hidden = false;
+      try { hidden = !!(root.document && root.document.hidden); } catch (e2) { /* ignore */ }
+      if (hidden || !lastRaf) { lastRaf = ts; return; }
+      var dt = ts - lastRaf;
+      lastRaf = ts;
+      if (dt < 4 || dt > 250) return; // first tick after a tab hide/show, or nonsense
+      emaMs += 0.22 * (dt - emaMs);
+      if (dt > 33) longStreak++; else longStreak = 0;
+      if (emaMs < 14 && dt < 22) goodStreak++; else goodStreak = 0;
+      var now = ts;
+      if (!lagging && (emaMs > 20 || longStreak >= 3)) {
+        lagging = true; goodStreak = 0; lagUntil = now + 500;
+      } else if (lagging && now > lagUntil && goodStreak >= 24 && emaMs < 16) {
+        lagging = false;
+      }
+    };
+    raf(loop);
+  }
+
+  function bucketRate() { return (lagging || load > 50) ? 12 : (load > 25 ? 18 : 28); }
+  function bucketBurst() { return (lagging || load > 50) ? 6 : (load > 25 ? 8 : 12); }
+  function stressed() { return lagging || load > 50; }
+
+  // Group plays into one animation frame (rAF) or, without rAF (tests), ~16 ms of audio clock.
+  function frameId() {
+    if (rafOn) return frameGen;
+    return ctx ? Math.floor(ctx.currentTime * 60) : 0;
+  }
 
   // ---------- voice graph + throttling ----------
   function parsePan(opts) {
@@ -748,14 +792,24 @@
       var meta = META[name] || { minInterval: 0.05, maxVoices: 4, prio: 3, vary: 0.05 };
       var prio = meta.prio || 3;
       var important = prio >= 7;
-      if (load > 50 && name === 'hit') return;
-      if (load > 50 && !important && (name.indexOf('shot_') === 0 || name.indexOf('kill') === 0)) {
-        thinN++;
-        if (thinN % (load > 120 ? 3 : 2) !== 0) return;
+      var hard = stressed();
+      var mild = !hard && load > 25;
+      if (name === 'hit' && hard) return;
+      if (name === 'hit' && mild) { thinN++; if (thinN % 2 !== 0) return; }
+      if (!important && (name.indexOf('shot_') === 0 || name.indexOf('kill') === 0)) {
+        if (hard) { thinN++; if (thinN % (load > 120 ? 3 : 2) !== 0) return; }
+        else if (mild) { thinN++; if (thinN % 3 === 0) return; }
+      }
+      if (!important) {
+        var fid = frameId();
+        if (fid !== lastPlayFrame) { lastPlayFrame = fid; playsThisFrame = 0; }
+        if (playsThisFrame >= (hard ? 2 : 3)) return;
+        playsThisFrame++;
       }
       if (!takeToken(important)) return;
       if (!gate(name, meta, prio)) return;
-      cheapMode = load > 50 || name === 'hit' || name.indexOf('shot_') === 0 || (name.indexOf('kill') === 0 && name !== 'kill_boss');
+      // Minimal voices when the thread is late, the board is heavy, or the sound is spammy.
+      cheapMode = hard || name === 'hit' || name.indexOf('shot_') === 0 || (name.indexOf('kill') === 0 && name !== 'kill_boss');
       var vary = meta.vary || 0;
       var pitch = (opts.pitch != null && isFinite(+opts.pitch) ? +opts.pitch : 1);
       if (opts.tier && isFinite(+opts.tier) && +opts.tier > 0) pitch *= 1 + Math.min(3, +opts.tier) * 0.06;
@@ -804,14 +858,18 @@
   function takeToken(always) {
     var t = ctx ? ctx.currentTime : 0;
     if (tokenAt === 0) tokenAt = t;
-    tokens = Math.min(BUCKET_BURST, tokens + Math.max(0, t - tokenAt) * BUCKET_RATE);
+    var rate = bucketRate(), burst = bucketBurst();
+    tokens = Math.min(burst, tokens + Math.max(0, t - tokenAt) * rate);
     tokenAt = t;
     if (always) { if (tokens >= 1) tokens -= 1; return true; }
     if (tokens >= 1) { tokens -= 1; return true; }
     return false;
   }
   function stats() {
-    return { load: load, tokens: +tokens.toFixed(2), nodes: nodeCount, rate: BUCKET_RATE };
+    return {
+      load: load, tokens: +tokens.toFixed(2), nodes: nodeCount, rate: bucketRate(),
+      emaMs: +emaMs.toFixed(1), lagging: lagging, cheap: stressed()
+    };
   }
   function resetStats() { nodeCount = 0; }
 
@@ -833,6 +891,6 @@
   if (typeof module !== 'undefined' && module.exports) module.exports = audio;
   if (typeof root !== 'undefined') {
     root.forgeAudio = audio;
-    root.audio = audio;
+    if (typeof root.audio === 'undefined') root.audio = audio;
   }
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));
