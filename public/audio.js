@@ -20,6 +20,8 @@
   var counts = Object.create(null);
   var active = [];
   var noiseBufs = Object.create(null);
+  var load = 0, cheapMode = false, thinN = 0, nodeCount = 0;
+  var BUCKET_RATE = 28, BUCKET_BURST = 12, tokens = 12, tokenAt = 0;
 
   // Inharmonic metal partials (not a harmonic series — sounds like struck iron, not a bell copy).
   var METAL = [1, 1.34, 1.77, 2.21, 2.92, 3.61, 4.45, 5.43];
@@ -52,6 +54,11 @@
   function createGraph() {
     if (ctx) return;
     ctx = new AC();
+    ['createOscillator', 'createBufferSource', 'createGain', 'createBiquadFilter', 'createStereoPanner', 'createPanner'].forEach(function (fn) {
+      if (!ctx[fn]) return;
+      var orig = ctx[fn];
+      ctx[fn] = function () { nodeCount++; return orig.apply(ctx, arguments); };
+    });
     master = ctx.createGain();
     master.gain.value = muted ? 0 : volume;
     limiter = ctx.createDynamicsCompressor();
@@ -268,8 +275,8 @@
   // Struck iron: inharmonic partials + a brief noise transient + a low body thud.
   function anvil(v, dest, t0, base, dur, gain, opts) {
     opts = opts || {};
-    var n = opts.partials || 6;
-    var noiseAmt = opts.noise != null ? opts.noise : 0.28;
+    var n = opts.partials != null ? opts.partials : (cheapMode ? 3 : 6);
+    var noiseAmt = opts.noise != null ? opts.noise : (cheapMode ? 0 : 0.28);
     if (noiseAmt > 0) {
       var bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
@@ -291,19 +298,25 @@
     }
   }
 
-  // Ember crackle: a handful of tiny high-passed sparks over `dur`.
+  // Ember crackle: one cached noise source, gain stuttered into a few sparks (not N buffers).
   function crackle(v, dest, t0, dur, gain, density) {
-    var n = Math.max(3, Math.floor(dur * (density || 28)));
+    var n = Math.max(2, Math.min(cheapMode ? 2 : 4, Math.floor(dur * (density || 12) / 8)));
+    var hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 2800;
+    var g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
     for (var i = 0; i < n; i++) {
-      var st = t0 + Math.random() * dur;
-      var w = 0.007 + Math.random() * 0.016;
-      var hp = ctx.createBiquadFilter();
-      hp.type = 'highpass';
-      hp.frequency.value = 1800 + Math.random() * 5200;
-      var g = envGain(dest, st, gain * (0.35 + Math.random() * 0.65), 0.0015, w);
-      startNoise(v, 'white', st, w + 0.01, hp);
-      hp.connect(g);
+      var st = t0 + (i + Math.random() * 0.5) * (dur / n);
+      var w = 0.008 + Math.random() * 0.012;
+      var pk = gain * (0.35 + Math.random() * 0.55);
+      g.gain.setValueAtTime(0.0001, st);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.0001, pk), st + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.0001, st + w);
     }
+    startNoise(v, 'white', t0, dur + 0.03, hp);
+    hp.connect(g);
+    g.connect(dest);
   }
 
   function sizzle(v, dest, t0, dur, gain, freq) {
@@ -398,7 +411,6 @@
     o.frequency.exponentialRampToValueAtTime(620 * p, t0 + 0.1);
     var ping = envGain(dest, t0, 0.22 * vol, 0.002, 0.07);
     startOsc(v, 'sine', 2480 * p, ping, t0, 0.08);
-    anvil(v, dest, t0, 1420 * p, 0.09, 0.08 * vol, { partials: 3, noise: 0.12, noThud: true });
     return 0.16;
   }
 
@@ -411,12 +423,12 @@
     var ng = envGain(dest, t0, 0.5 * vol, 0.004, 0.2);
     startNoise(v, 'pink', t0, 0.22, lp);
     lp.connect(ng);
-    anvil(v, dest, t0 + 0.02, 220 * p, 0.22, 0.22 * vol, { partials: 4, noise: 0.2 });
+    if (!cheapMode) anvil(v, dest, t0 + 0.02, 220 * p, 0.22, 0.22 * vol, { partials: 3, noise: 0.15, noThud: true });
     return 0.38;
   }
 
   function shotFrost(v, dest, t0, p, vol) {
-    hiss(v, dest, t0, 0.16, 0.32 * vol);
+    if (!cheapMode) hiss(v, dest, t0, 0.16, 0.32 * vol);
     var bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
     bp.Q.value = 1.6;
@@ -426,15 +438,19 @@
     startNoise(v, 'pink', t0, 0.2, bp);
     bp.connect(wg);
     var g1 = envGain(dest, t0, 0.2 * vol, 0.006, 0.22);
-    var g2 = envGain(dest, t0, 0.14 * vol, 0.006, 0.2);
     startOsc(v, 'sine', 1760 * p, g1, t0, 0.24);
-    startOsc(v, 'sine', 2640 * p, g2, t0, 0.22);
+    if (!cheapMode) {
+      var g2 = envGain(dest, t0, 0.14 * vol, 0.006, 0.2);
+      startOsc(v, 'sine', 2640 * p, g2, t0, 0.22);
+    }
     return 0.26;
   }
 
   function hitTick(v, dest, t0, p, vol) {
-    anvil(v, dest, t0, 1680 * p, 0.06, 0.18 * vol, { partials: 4, noise: 0.2, noThud: true });
-    return 0.08;
+    var g = envGain(dest, t0, 0.2 * vol, 0.002, 0.045);
+    var o = startOsc(v, 'triangle', 1680 * p, g, t0, 0.05);
+    o.frequency.exponentialRampToValueAtTime(Math.max(20, 880 * p), t0 + 0.04);
+    return 0.06;
   }
 
   function killClank(v, dest, t0, p, vol, kind) {
@@ -443,9 +459,10 @@
     var base = (tiny ? 980 : kind === 'runner' ? 720 : kind === 'boss' ? 140 : kind === 'brute' ? 210 : 420) * p;
     var dur = tiny ? 0.14 : heavy ? (kind === 'boss' ? 0.7 : 0.42) : 0.28;
     var g = (tiny ? 0.28 : heavy ? 0.55 : 0.38) * vol;
-    anvil(v, dest, t0, base, dur, g, { partials: tiny ? 4 : heavy ? 8 : 6, noise: heavy ? 0.4 : 0.25, noThud: tiny });
-    crackle(v, dest, t0 + 0.01, dur * 0.7, g * (heavy ? 0.45 : 0.32), tiny ? 40 : heavy ? 22 : 30);
-    sizzle(v, dest, t0, dur * 0.65, g * (heavy ? 0.28 : 0.18), tiny ? 7000 : 4800);
+    var parts = cheapMode ? (heavy ? 4 : 3) : (tiny ? 4 : heavy ? 8 : 6);
+    anvil(v, dest, t0, base, dur, g, { partials: parts, noise: cheapMode ? 0 : (heavy ? 0.4 : 0.25), noThud: tiny || cheapMode });
+    if (!cheapMode || heavy) crackle(v, dest, t0 + 0.01, dur * 0.7, g * (heavy ? 0.45 : 0.32), tiny ? 16 : heavy ? 14 : 16);
+    if (!cheapMode) sizzle(v, dest, t0, dur * 0.65, g * (heavy ? 0.28 : 0.18), tiny ? 7000 : 4800);
     if (kind === 'boss') {
       boomBody(v, dest, t0, 70 * p, 0.45, 0.45 * vol);
       sizzle(v, dest, t0 + 0.05, 0.5, 0.22 * vol, 3200);
@@ -730,7 +747,15 @@
       if (!fn) return;
       var meta = META[name] || { minInterval: 0.05, maxVoices: 4, prio: 3, vary: 0.05 };
       var prio = meta.prio || 3;
+      var important = prio >= 7;
+      if (load > 50 && name === 'hit') return;
+      if (load > 50 && !important && (name.indexOf('shot_') === 0 || name.indexOf('kill') === 0)) {
+        thinN++;
+        if (thinN % (load > 120 ? 3 : 2) !== 0) return;
+      }
+      if (!takeToken(important)) return;
       if (!gate(name, meta, prio)) return;
+      cheapMode = load > 50 || name === 'hit' || name.indexOf('shot_') === 0 || (name.indexOf('kill') === 0 && name !== 'kill_boss');
       var vary = meta.vary || 0;
       var pitch = (opts.pitch != null && isFinite(+opts.pitch) ? +opts.pitch : 1);
       if (opts.tier && isFinite(+opts.tier) && +opts.tier > 0) pitch *= 1 + Math.min(3, +opts.tier) * 0.06;
@@ -770,6 +795,26 @@
   function isUnlocked() { return !!(unlocked && ctx && ctx.state === 'running'); }
   function names() { return Object.keys(SOUNDS); }
 
+  function setLoad(n) {
+    return safe(function () {
+      load = Math.max(0, Number(n) || 0);
+      return load;
+    });
+  }
+  function takeToken(always) {
+    var t = ctx ? ctx.currentTime : 0;
+    if (tokenAt === 0) tokenAt = t;
+    tokens = Math.min(BUCKET_BURST, tokens + Math.max(0, t - tokenAt) * BUCKET_RATE);
+    tokenAt = t;
+    if (always) { if (tokens >= 1) tokens -= 1; return true; }
+    if (tokens >= 1) { tokens -= 1; return true; }
+    return false;
+  }
+  function stats() {
+    return { load: load, tokens: +tokens.toFixed(2), nodes: nodeCount, rate: BUCKET_RATE };
+  }
+  function resetStats() { nodeCount = 0; }
+
   var audio = {
     play: play,
     unlock: unlock,
@@ -779,9 +824,15 @@
     toggleMute: toggleMute,
     isMuted: isMuted,
     isUnlocked: isUnlocked,
-    names: names
+    names: names,
+    setLoad: setLoad,
+    stats: stats,
+    resetStats: resetStats
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = audio;
-  else root.audio = audio;
+  if (typeof root !== 'undefined') {
+    root.forgeAudio = audio;
+    root.audio = audio;
+  }
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));

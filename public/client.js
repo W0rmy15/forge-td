@@ -12,18 +12,31 @@
   let buildType = null, selected = null, hover = null; // hover: {b,c,r,fx,fy}
   let overPainted = '';
 
-  function aud(name, opts) { try { window.audio && audio.play(name, opts); } catch (e) {} }
+  function audApi() {
+    const a = (window.forgeAudio && typeof window.forgeAudio.play === 'function') ? window.forgeAudio
+      : (window.audio && typeof window.audio.play === 'function') ? window.audio : null;
+    return a && typeof a.getVolume === 'function' && typeof a.isMuted === 'function' ? a : (a && typeof a.play === 'function' ? a : null);
+  }
+  function aud(name, opts) { try { const a = audApi(); if (a && typeof a.play === 'function') a.play(name, opts); } catch (e) {} }
   (function setupAudioUi() {
     const muteBtn = $('muteBtn'), slider = $('volSlider');
     if (!muteBtn || !slider) return;
     const paint = () => {
-      if (!window.audio) return;
-      slider.value = Math.round(audio.getVolume() * 100);
-      muteBtn.textContent = audio.isMuted() ? '🔇' : '🔊';
-      muteBtn.setAttribute('aria-pressed', audio.isMuted() ? 'true' : 'false');
+      try {
+        const a = audApi();
+        if (!a || typeof a.getVolume !== 'function' || typeof a.isMuted !== 'function') return;
+        slider.value = Math.round(a.getVolume() * 100);
+        muteBtn.textContent = a.isMuted() ? '🔇' : '🔊';
+        muteBtn.setAttribute('aria-pressed', a.isMuted() ? 'true' : 'false');
+      } catch (e) { /* foreign window.audio must never break the client */ }
     };
-    muteBtn.onclick = () => { try { window.audio && (audio.unlock(), audio.toggleMute()); } catch (e) {} aud('ui_click'); paint(); };
-    slider.oninput = () => { try { window.audio && (audio.unlock(), audio.setVolume(+slider.value / 100)); } catch (e) {} paint(); };
+    const blurAud = () => { try { muteBtn.blur(); slider.blur(); } catch (e) {} };
+    muteBtn.onclick = () => { try { const a = audApi(); if (a) { if (a.unlock) a.unlock(); if (a.toggleMute) a.toggleMute(); } } catch (e) {} aud('ui_click'); paint(); blurAud(); };
+    slider.oninput = () => { try { const a = audApi(); if (a) { if (a.unlock) a.unlock(); if (a.setVolume) a.setVolume(+slider.value / 100); } } catch (e) {} paint(); };
+    muteBtn.addEventListener('pointerup', blurAud);
+    slider.addEventListener('pointerup', blurAud);
+    slider.addEventListener('change', blurAud);
+    slider.addEventListener('keyup', blurAud);
     paint();
   })();
 
@@ -212,6 +225,11 @@
   function onState(s) {
     const m = me();
     if (!m) return;
+    try {
+      const a = audApi(), n = (s.boards && s.boards.L && s.boards.L.creeps ? s.boards.L.creeps.length : 0)
+        + (s.boards && s.boards.R && s.boards.R.creeps ? s.boards.R.creeps.length : 0);
+      if (a && typeof a.setLoad === 'function') a.setLoad(n);
+    } catch (e) {}
     $('gold').textContent = m.gold; $('income').textContent = m.income;
     $('nextIncome').textContent = Math.ceil(s.nextIncome) + 's';
     $('wave').textContent = s.wave; $('nextWave').textContent = Math.ceil(s.nextWave) + 's';
@@ -397,8 +415,10 @@
     else selected = null;
   });
   document.addEventListener('keydown', (e) => {
-    if (document.activeElement && document.activeElement.tagName === 'INPUT') {
-      if (e.key === 'Enter' && document.activeElement.id === 'chatInput') {
+    const ae = document.activeElement;
+    const typ = ae && ae.tagName === 'INPUT' ? (ae.type || 'text').toLowerCase() : '';
+    if (ae && (ae.tagName === 'TEXTAREA' || typ === 'text' || typ === 'search' || typ === 'number' || typ === 'password' || typ === 'email' || typ === 'url' || typ === 'tel')) {
+      if (e.key === 'Enter' && ae.id === 'chatInput') {
         const v = $('chatInput').value.trim(); if (v) sendMsg({ t: 'chat', text: v }); $('chatInput').value = ''; $('chatInput').blur();
       }
       return;
