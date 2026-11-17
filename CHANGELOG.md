@@ -2,7 +2,7 @@
 
 ## 0.5.2 — 2026-11-17
 
-2v2 economy follow-up from the v0.5.1 QA review. No client or protocol changes.
+2v2 economy follow-up from the v0.5.1 QA review. No protocol changes. The client also ships the Forge Sound and Forge Art follow-ups listed below.
 
 - **2v2 send income ×0.70** (`SEND_TEAM2_INCOME`, was 0.75).
 - **Send-tier income is scaled the same way in 2v2** (`SEND_TEAM2_UPINCOME`). In v0.5.1, buying a tier still paid
@@ -16,10 +16,12 @@
   - `test/matrix.js` shows 0 sender wins under 8 min.
 - `test/tune51.js` gains a `mirror` mode and the `V52` variant. New `test/sim.js` checks cover send-tier income in
   1v1 vs 2v2.
+- **Audio (Forge Sound, f0f2e61 and later):** an adaptive cheap mode driven by frame time, a per-frame sound cap, noise buffers built once at unlock, and a page's own `window.audio` is no longer overwritten.
+- **Art (Forge Art, 619d1ce, c5fa6ef, ad34ae9):** tighter creep sprites, a cheap ice ring in low-detail mode, the OffscreenCanvas size guard, 2v2 income and bounty in the send buttons and tooltips, low-detail on at 80 creeps (off at 55), mute and volume inside the panel, a bigger lane-full badge, and less CSS overdraw (FPS back at v0.4 levels).
 
 ## 0.5.1 — 2026-11-16
 
-Core balance from the v0.5 QA review (QA fix A+B for 2v2 heavy senders). No client or protocol changes.
+Core balance from the v0.5 QA review (QA fix A+B for 2v2 heavy senders). No protocol changes. The deployed build also includes Forge Sound's audio hooks and fixes and Forge Art's forge-theme art.
 
 - **2v2 send income ×0.75** (`SEND_TEAM2_INCOME`): heavy 2v2 senders reached about 100 income against 18 and won late
   on economy alone.
