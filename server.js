@@ -288,8 +288,17 @@ function take(b, rate, burst) {
 }
 
 function clientIp(req) {
-  const xf = req.headers['x-forwarded-for'];
-  return (typeof xf === 'string' && xf.split(',')[0].trim()) || req.socket.remoteAddress || '?';
+  // Prefer headers set by the edge proxy (Cloudflare/Render); client-supplied XFF first values can be forged.
+  const h = req.headers;
+  for (const k of ['cf-connecting-ip', 'true-client-ip']) {
+    if (typeof h[k] === 'string' && h[k].trim()) return h[k].trim();
+  }
+  const xf = h['x-forwarded-for'];
+  if (typeof xf === 'string' && xf.trim()) {
+    const parts = xf.split(',').map(x => x.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1]; // last hop appended by the trusted proxy
+  }
+  return req.socket.remoteAddress || '?';
 }
 
 wss.on('connection', (ws, req) => {
