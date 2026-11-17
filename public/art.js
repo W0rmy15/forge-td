@@ -34,22 +34,47 @@
     return gr;
   }
   function shine(g, x, y, r) { g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.ellipse(x - r * 0.38, y - r * 0.46, r * 0.27, r * 0.15, -0.6, 0, 7); g.fill(); }
+  // Cached unit-star coordinates so per-frame particle stars skip trig (hot path: pops/flakes/muzzles).
+  // A.star() still builds the current path so existing fill/stroke call sites keep working.
+  const STAR_PTS = new Map();
+  function starPts(n, inner) {
+    const inn = inner == null ? 0.5 : inner, key = n + ':' + inn;
+    let p = STAR_PTS.get(key);
+    if (!p) {
+      p = new Float64Array(n * 4);
+      for (let i = 0; i < n * 2; i++) { const a = -Math.PI / 2 + (i * Math.PI) / n, rr = i % 2 ? inn : 1; p[i * 2] = Math.cos(a) * rr; p[i * 2 + 1] = Math.sin(a) * rr; }
+      STAR_PTS.set(key, p);
+    }
+    return p;
+  }
   function star(g, x, y, r, n, inner) {
-    g.beginPath();
-    for (let i = 0; i < n * 2; i++) { const a = -Math.PI / 2 + (i * Math.PI) / n, rr = i % 2 ? r * (inner || 0.5) : r; g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+    const p = starPts(n, inner);
+    g.beginPath(); g.moveTo(x + p[0] * r, y + p[1] * r);
+    for (let i = 2; i < p.length; i += 2) g.lineTo(x + p[i] * r, y + p[i + 1] * r);
     g.closePath();
   }
   A.star = star;
+  // Pre-rendered white 8-point star (and a few others) for callers that can drawImage instead of path-fill.
+  A.starSpr = function (n, inner, fill, stroke, r) {
+    const rr = r || 12, inn = inner == null ? 0.45 : inner, f = fill || '#fff', k = `ss|${n}|${inn}|${f}|${stroke || ''}|${rr}`;
+    return sprite(k, rr * 2 + 6, rr * 2 + 6, (g) => {
+      star(g, 0, 0, rr, n, inn);
+      g.fillStyle = f; g.fill();
+      if (stroke) { g.lineWidth = 2; g.strokeStyle = stroke; g.stroke(); }
+    });
+  };
   function rrect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
   A.rrect = rrect;
 
   // ---------- creeps ----------
   const BALLOON = ['#ff4d4d', '#3d9bff', '#3fd16a', '#ffd23f', '#ff6fd0', '#ff9733', '#9d6bff', '#25d9c9'];
-  const TIER_RING = [null, '#d98b45', '#e4ecf5', '#ffd23a'];
+  // Tier colours separated by luminance (dark / mid / bright), not just hue — holds up in deutan, tritan and grayscale.
+  const TIER_RING = [null, '#3a2416', '#8a96aa', '#fff6a8'];
+  // Type colours also split by luminance: runners stay light, swarms stay dark (so T3 yellow vs pink still differ under tritanopia).
   const KIND = {
-    runner: ['#86e35a', '#2fcf6a', '#ffab2e', '#ffe14a'],
-    swarm: ['#c08bff', '#a066ff', '#ff6fbf', '#ff3f8e'],
-    brute: ['#ff6b5b', '#e8453c', '#d23a4c', '#a8203a'],
+    runner: ['#9aee6a', '#4edc6a', '#ffc44a', '#fff38a'],
+    swarm: ['#5a2fa0', '#4a1e90', '#8a1868', '#6a0e50'],
+    brute: ['#ff6b5b', '#e8453c', '#c42a3a', '#8e1428'],
   };
   A.creepColor = function (kind, v) {
     if (kind === 'neutral') return BALLOON[((v || 1) - 1) % BALLOON.length];
@@ -57,7 +82,7 @@
     const k = KIND[kind]; return k ? k[Math.min(3, v || 0)] : '#ccc';
   };
   // visual radius (px) for a creep with sim radius r (cells)
-  A.creepR = function (kind, r, cell) { return Math.max(5.5, r * cell * (kind === 'swarm' ? 1.55 : kind === 'boss' ? 1.25 : 1.4)); };
+  A.creepR = function (kind, r, cell) { return Math.max(kind === 'swarm' ? 7 : 5.5, r * cell * (kind === 'swarm' ? 1.7 : kind === 'boss' ? 1.25 : 1.4)); };
 
   function eyes(g, R, angry, look) {
     const ex = R * 0.33, ey = -R * 0.08, er = Math.max(1.5, R * 0.28);
@@ -80,8 +105,12 @@
     else if (kind === 'grin') { g.beginPath(); g.arc(0, R * 0.18, R * 0.32, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke(); }
     else { g.beginPath(); g.arc(0, R * 0.2, R * 0.22, 0.12 * Math.PI, 0.88 * Math.PI); g.stroke(); }
   }
-  function body(g, R, col, lw) {
-    g.beginPath(); g.ellipse(0, 0, R, R * 0.95, 0, 0, Math.PI * 2);
+  function body(g, R, col, lw, kind) {
+    // Distinct silhouettes so types still read when hue collapses (tall runner, flat swarm, round brute).
+    g.beginPath();
+    if (kind === 'runner') g.ellipse(0, -R * 0.04, R * 0.82, R * 1.06, 0, 0, Math.PI * 2);
+    else if (kind === 'swarm') g.ellipse(0, R * 0.08, R * 1.1, R * 0.8, 0, 0, Math.PI * 2);
+    else g.ellipse(0, 0, R, R * 0.95, 0, 0, Math.PI * 2);
     g.fillStyle = glossy(g, 0, 0, R, col); g.fill(); g.lineWidth = lw; g.strokeStyle = OUT; g.stroke();
   }
   function wing(g, R, s) {
@@ -94,39 +123,44 @@
   function tierRing(g, R, tier, lw) {
     const col = TIER_RING[tier];
     if (tier === 1) {
-      circ(g, 0, 0, R + lw * 1.7, null, lw * 1.2, col);
-      circ(g, 0, 0, R + lw * 2.25, null, Math.max(0.7, lw * 0.4), OUT);
+      // dark, thick single ring
+      circ(g, 0, 0, R + lw * 1.85, null, Math.max(2.2, lw * 1.55), col);
+      circ(g, 0, 0, R + lw * 2.55, null, Math.max(0.8, lw * 0.45), OUT);
     } else if (tier === 2) {
-      circ(g, 0, 0, R + lw * 1.45, null, lw * 0.85, col);
-      circ(g, 0, 0, R + lw * 2.25, null, lw * 0.95, col);
-      circ(g, 0, 0, R + lw * 2.75, null, Math.max(0.7, lw * 0.4), OUT);
+      // mid-luminance double ring
+      circ(g, 0, 0, R + lw * 1.5, null, Math.max(1.3, lw * 0.9), col);
+      circ(g, 0, 0, R + lw * 2.4, null, Math.max(1.5, lw * 1.05), col);
+      circ(g, 0, 0, R + lw * 3.0, null, Math.max(0.8, lw * 0.45), OUT);
     } else if (tier === 3) {
-      const rr = R + lw * 1.85, spikes = 8;
-      g.beginPath();
-      for (let i = 0; i < spikes * 2; i++) {
-        const a = -Math.PI / 2 + (i * Math.PI) / spikes, rad = i % 2 ? rr * 0.88 : rr * 1.08;
-        i ? g.lineTo(Math.cos(a) * rad, Math.sin(a) * rad) : g.moveTo(Math.cos(a) * rad, Math.sin(a) * rad);
-      }
-      g.closePath(); g.strokeStyle = col; g.lineWidth = Math.max(1.6, lw * 1.05); g.stroke();
-      g.strokeStyle = OUT; g.lineWidth = Math.max(0.7, lw * 0.4); g.stroke();
+      // very bright, thick spiked ring with a dark outline
+      const rr = R + lw * 2.05, spikes = 8, pts = starPts(spikes, 0.86);
+      g.beginPath(); g.moveTo(pts[0] * rr, pts[1] * rr);
+      for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i] * rr, pts[i + 1] * rr);
+      g.closePath();
+      g.strokeStyle = OUT; g.lineWidth = Math.max(3.2, lw * 1.8); g.stroke();
+      g.strokeStyle = col; g.lineWidth = Math.max(2.2, lw * 1.25); g.stroke();
     }
   }
   function tierBadge(g, R, tier, lw) {
     if (!tier) return;
-    const col = TIER_RING[tier], bx = R * 0.78, by = R * 0.78, br = Math.max(2.8, R * 0.34);
-    circ(g, bx, by, br + 0.4, '#fff8e6', Math.max(0.8, lw * 0.55));
-    g.fillStyle = col; g.strokeStyle = OUT; g.lineWidth = Math.max(0.8, lw * 0.5);
+    const col = TIER_RING[tier], bx = R * 0.88, by = R * 0.92, br = Math.max(4.4, R * 0.5);
+    circ(g, bx, by, br + 0.7, '#fff8e6', Math.max(1.1, lw * 0.65));
+    g.fillStyle = col; g.strokeStyle = OUT; g.lineWidth = Math.max(1.15, lw * 0.65);
     if (tier === 1) { // triangle
-      g.beginPath(); g.moveTo(bx, by - br * 0.72); g.lineTo(bx + br * 0.7, by + br * 0.5); g.lineTo(bx - br * 0.7, by + br * 0.5); g.closePath();
+      g.beginPath(); g.moveTo(bx, by - br * 0.78); g.lineTo(bx + br * 0.78, by + br * 0.55); g.lineTo(bx - br * 0.78, by + br * 0.55); g.closePath();
     } else if (tier === 2) { // diamond
-      g.beginPath(); g.moveTo(bx, by - br * 0.78); g.lineTo(bx + br * 0.7, by); g.lineTo(bx, by + br * 0.78); g.lineTo(bx - br * 0.7, by); g.closePath();
-    } else { star(g, bx, by, br * 0.78, 5, 0.45); }
+      g.beginPath(); g.moveTo(bx, by - br * 0.82); g.lineTo(bx + br * 0.78, by); g.lineTo(bx, by + br * 0.82); g.lineTo(bx - br * 0.78, by); g.closePath();
+    } else { star(g, bx, by, br * 0.82, 5, 0.45); }
     g.fill(); g.stroke();
   }
   function drawCreep(g, kind, v, R) {
     const col = A.creepColor(kind, v), lw = Math.max(1.5, R * 0.2), tier = kind === 'neutral' || kind === 'boss' ? 0 : Math.min(3, v || 0);
     tierRing(g, R, tier, lw);
-    if (kind === 'runner' && tier >= 2) { wing(g, R, -1); wing(g, R, 1); }
+    if (kind === 'runner') { // pointed tail + T2+ wings: tall balloon silhouette
+      g.beginPath(); g.moveTo(-R * 0.22, R * 0.9); g.lineTo(0, R * 1.45); g.lineTo(R * 0.22, R * 0.9); g.closePath();
+      g.fillStyle = shade(col, -0.2); g.fill(); g.lineWidth = lw * 0.8; g.strokeStyle = OUT; g.stroke();
+      if (tier >= 2) { wing(g, R, -1); wing(g, R, 1); }
+    }
     if (kind === 'neutral') { // balloon knot + string nub
       g.beginPath(); g.moveTo(0, R * 0.85); g.lineTo(-R * 0.24, R * 1.28); g.lineTo(R * 0.24, R * 1.28); g.closePath(); g.fillStyle = shade(col, -0.25); g.fill(); g.lineWidth = lw * 0.8; g.strokeStyle = OUT; g.stroke();
       g.strokeStyle = shade(col, -0.35); g.lineWidth = Math.max(0.8, lw * 0.45); g.beginPath(); g.moveTo(0, R * 1.28); g.quadraticCurveTo(R * 0.12, R * 1.55, 0, R * 1.7); g.stroke();
@@ -134,11 +168,20 @@
     if (kind === 'boss') { // horns
       for (const s of [-1, 1]) { g.beginPath(); g.moveTo(s * R * 0.35, -R * 0.75); g.quadraticCurveTo(s * R * 0.95, -R * 1.25, s * R * 0.95, -R * 1.45); g.quadraticCurveTo(s * R * 0.75, -R * 0.95, s * R * 0.75, -R * 0.5); g.closePath(); g.fillStyle = '#fff3d6'; g.fill(); g.lineWidth = lw * 0.8; g.strokeStyle = OUT; g.stroke(); }
     }
-    if (kind === 'swarm' && tier >= 2) { // antennae
-      g.strokeStyle = OUT; g.lineWidth = Math.max(0.8, lw * 0.6);
-      for (const s of [-1, 1]) { g.beginPath(); g.moveTo(s * R * 0.25, -R * 0.8); g.quadraticCurveTo(s * R * 0.4, -R * 1.4, s * R * 0.75, -R * 1.5); g.stroke(); circ(g, s * R * 0.75, -R * 1.5, Math.max(1, R * 0.2), '#ffe14a', lw * 0.5); }
+    if (kind === 'swarm') { // antennae on every tier — the swarm silhouette (previously only T2+ and ~7 px)
+      g.strokeStyle = OUT; g.lineWidth = Math.max(1.6, lw * 0.85);
+      for (const s of [-1, 1]) {
+        g.beginPath(); g.moveTo(s * R * 0.3, -R * 0.55); g.quadraticCurveTo(s * R * 0.7, -R * 1.45, s * R * 1.05, -R * 1.7); g.stroke();
+        circ(g, s * R * 1.05, -R * 1.7, Math.max(2.4, R * 0.32), '#ffe14a', Math.max(1, lw * 0.55));
+      }
     }
-    body(g, R, col, lw);
+    body(g, R, col, lw, kind);
+    if (kind === 'swarm') { // dark belly bands — readable when pink hue collapses
+      g.save(); g.beginPath(); g.ellipse(0, R * 0.08, R * 1.1, R * 0.8, 0, 0, 7); g.clip();
+      g.strokeStyle = 'rgba(38,32,58,0.5)'; g.lineWidth = Math.max(2, R * 0.24);
+      for (const y of [-R * 0.12, R * 0.22]) { g.beginPath(); g.moveTo(-R * 1.2, y); g.lineTo(R * 1.2, y); g.stroke(); }
+      g.restore();
+    }
     if (kind === 'brute' && tier >= 2) { // shoulder armour plates
       for (const s of [-1, 1]) { g.beginPath(); g.ellipse(s * R * 0.82, R * 0.28, R * 0.34, R * 0.42, s * 0.4, 0, 7); g.fillStyle = tier === 3 ? '#ffd23a' : '#c9d3df'; g.fill(); g.lineWidth = lw * 0.8; g.strokeStyle = OUT; g.stroke(); }
     }
@@ -155,14 +198,14 @@
       g.beginPath(); g.arc(0, -R * 0.15, R * 0.98, Math.PI * 1.08, Math.PI * 1.92); g.closePath(); g.fillStyle = glossy(g, 0, -R * 0.6, R * 0.8, '#ffd23a'); g.fill(); g.lineWidth = lw * 0.8; g.strokeStyle = OUT; g.stroke();
       g.beginPath(); g.moveTo(R * 0.1, -R * 1.0); g.lineTo(-R * 0.15, -R * 0.62); g.lineTo(R * 0.05, -R * 0.62); g.lineTo(-R * 0.12, -R * 0.3); g.lineTo(R * 0.25, -R * 0.72); g.lineTo(R * 0.05, -R * 0.72); g.closePath(); g.fillStyle = '#fff'; g.fill();
     }
-    if (kind === 'swarm' && tier === 1) { // bow
-      g.fillStyle = '#ff5fa8'; g.strokeStyle = OUT; g.lineWidth = Math.max(0.7, lw * 0.5);
-      for (const s of [-1, 1]) { g.beginPath(); g.moveTo(R * 0.35, -R * 0.85); g.lineTo(R * 0.35 + s * R * 0.42, -R * 1.15); g.lineTo(R * 0.35 + s * R * 0.42, -R * 0.55); g.closePath(); g.fill(); g.stroke(); }
-      circ(g, R * 0.35, -R * 0.85, R * 0.14, '#ff5fa8', Math.max(0.7, lw * 0.5));
+    if (kind === 'swarm' && tier === 1) { // bigger bow, sits between the antennae
+      g.fillStyle = '#ff7ac0'; g.strokeStyle = OUT; g.lineWidth = Math.max(1.1, lw * 0.6);
+      for (const s of [-1, 1]) { g.beginPath(); g.moveTo(0, -R * 0.55); g.lineTo(s * R * 0.7, -R * 1.05); g.lineTo(s * R * 0.7, -R * 0.2); g.closePath(); g.fill(); g.stroke(); }
+      circ(g, 0, -R * 0.55, Math.max(2, R * 0.22), '#ff7ac0', Math.max(1, lw * 0.55));
     }
-    if (kind === 'swarm' && tier === 3) { // crown
-      g.beginPath(); g.moveTo(-R * 0.55, -R * 0.7); g.lineTo(-R * 0.6, -R * 1.25); g.lineTo(-R * 0.25, -R * 0.95); g.lineTo(0, -R * 1.35); g.lineTo(R * 0.25, -R * 0.95); g.lineTo(R * 0.6, -R * 1.25); g.lineTo(R * 0.55, -R * 0.7); g.closePath();
-      g.fillStyle = '#ffd23a'; g.fill(); g.lineWidth = Math.max(0.8, lw * 0.55); g.strokeStyle = OUT; g.stroke();
+    if (kind === 'swarm' && tier === 3) { // bigger crown
+      g.beginPath(); g.moveTo(-R * 0.7, -R * 0.45); g.lineTo(-R * 0.78, -R * 1.15); g.lineTo(-R * 0.32, -R * 0.8); g.lineTo(0, -R * 1.3); g.lineTo(R * 0.32, -R * 0.8); g.lineTo(R * 0.78, -R * 1.15); g.lineTo(R * 0.7, -R * 0.45); g.closePath();
+      g.fillStyle = '#fff6a8'; g.fill(); g.lineWidth = Math.max(1.2, lw * 0.65); g.strokeStyle = OUT; g.stroke();
     }
     if (kind === 'brute' && tier === 1) { // sticking plaster
       g.save(); g.translate(R * 0.42, -R * 0.55); g.rotate(0.6); g.fillStyle = '#ffe0b3'; g.fillRect(-R * 0.3, -R * 0.1, R * 0.6, R * 0.2); g.lineWidth = Math.max(0.7, lw * 0.4); g.strokeStyle = OUT; g.strokeRect(-R * 0.3, -R * 0.1, R * 0.6, R * 0.2); g.restore();
@@ -179,7 +222,7 @@
   // cached creep sprite: {c,w,h}; draw centred at the creep position with size w x h
   A.creep = function (kind, v, R) {
     const Rq = Math.round(R * 2) / 2, vk = kind === 'neutral' ? ((v || 1) - 1) % BALLOON.length : kind === 'boss' ? 0 : Math.min(3, v || 0);
-    const size = Rq * 3.8 + 8;
+    const size = Rq * 4.6 + 12;
     return sprite(`c|${kind}|${vk}|${Rq}`, size, size, (g) => drawCreep(g, kind, kind === 'neutral' ? vk + 1 : vk, Rq));
   };
   // hit flash: a soft white rim so the face stays readable
@@ -339,21 +382,24 @@
     if (pts.length < 2) return;
     const line = (w, col) => { g.strokeStyle = col; g.lineWidth = w; g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]); g.stroke(); };
     g.lineJoin = 'round'; g.lineCap = 'round';
-    line(cell * 0.88, 'rgba(60,40,20,0.18)');
-    line(cell * 0.76, '#a56f38');
-    line(cell * 0.62, '#e8c48a');
-    line(cell * 0.22, 'rgba(255,240,205,0.5)');
+    // Dark outer edge stays dark under deuteranopia (where grass and tan fill would otherwise match).
+    line(cell * 0.98, '#2a1810');
+    line(cell * 0.86, '#5a3218');
+    line(cell * 0.68, '#c48948');
+    line(cell * 0.24, 'rgba(255,230,180,0.55)');
     const R = rng(7);
     for (let i = 1; i < pts.length; i++) { // pebbles
       if (R() < 0.5) continue;
-      const t = R(), x = pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t + (R() - 0.5) * cell * 0.4, y = pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t + (R() - 0.5) * cell * 0.4;
-      g.fillStyle = 'rgba(150,105,60,0.55)'; g.beginPath(); g.ellipse(x, y, 1.6, 1.1, R() * 3, 0, 7); g.fill();
+      const t = R(), x = pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t + (R() - 0.5) * cell * 0.35, y = pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t + (R() - 0.5) * cell * 0.35;
+      g.fillStyle = 'rgba(50,28,12,0.55)'; g.beginPath(); g.ellipse(x, y, 1.7, 1.15, R() * 3, 0, 7); g.fill();
     }
-    // direction chevrons every few cells
-    g.strokeStyle = 'rgba(140,95,50,0.65)'; g.lineWidth = 2.3;
-    for (let i = 2; i < pts.length - 1; i += 3) {
+    // filled dark chevrons — luminance contrast, not hue
+    g.fillStyle = '#2a1810'; g.strokeStyle = '#2a1810'; g.lineWidth = 1.2;
+    for (let i = 2; i < pts.length - 1; i += 2) {
       const [x1, y1] = pts[i - 1], [x2, y2] = pts[i]; const a = Math.atan2(y2 - y1, x2 - x1), mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-      g.save(); g.translate(mx, my); g.rotate(a); g.beginPath(); g.moveTo(-3, -4); g.lineTo(2.4, 0); g.lineTo(-3, 4); g.stroke(); g.restore();
+      g.save(); g.translate(mx, my); g.rotate(a);
+      g.beginPath(); g.moveTo(-4, -5.5); g.lineTo(5, 0); g.lineTo(-4, 5.5); g.closePath(); g.fill(); g.stroke();
+      g.restore();
     }
   };
   A.drawPortal = function (g, x, y, cell) {
