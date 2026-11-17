@@ -5,11 +5,12 @@
 body{margin:0;min-height:100vh;color:var(--ink);font-family:var(--ui);font-weight:500;background:#1c1410;overflow-x:hidden}
 #sky{position:fixed;inset:0;z-index:-1;background:linear-gradient(#1c1410 0%,#3a2214 55%,#2a1810 100%);overflow:hidden}
 #sky .hills{position:absolute;left:-10%;right:-10%;bottom:-40px;height:220px;background:radial-gradient(ellipse at 20% 100%,#2a3230 0 45%,transparent 46%),radial-gradient(ellipse at 70% 110%,#1e2624 0 50%,transparent 51%),radial-gradient(ellipse at 100% 100%,#323a36 0 40%,transparent 41%)}
-#sky .cloud{position:absolute;width:160px;height:50px;background:#4a4440;border-radius:50px;opacity:.28;box-shadow:0 4px 12px rgba(0,0,0,.2);animation:drift 70s linear infinite;filter:blur(1px)}
+#sky .cloud{position:absolute;width:160px;height:50px;background:#4a4440;border-radius:50px;opacity:.28;box-shadow:0 4px 0 rgba(0,0,0,.15);animation:drift 70s linear infinite}
 #sky .cloud:before,#sky .cloud:after{content:'';position:absolute;background:#4a4440;border-radius:50%}
 #sky .cloud:before{width:70px;height:70px;left:22px;top:-32px}#sky .cloud:after{width:56px;height:56px;left:78px;top:-22px}
 #sky .c1{top:60px;left:-200px}#sky .c2{top:160px;left:-500px;transform:scale(.7);animation-duration:95s}#sky .c3{top:30px;left:-900px;transform:scale(1.2);animation-duration:120s}
 @keyframes drift{to{margin-left:calc(100vw + 1100px)}}
+body:has(#game:not(.hidden)) #sky .cloud{animation:none;visibility:hidden}
 .hidden{display:none!important}
 .screen{display:flex;flex-direction:column;align-items:center;padding:20px}
 h1{margin:8px 0;font-weight:700}
@@ -51,14 +52,15 @@ p.hint.card{min-width:0;max-width:560px;padding:10px 14px;font-size:14px}
 .dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;border:2px solid var(--out);vertical-align:-1px}
 .gamewrap{display:flex;gap:12px;align-items:flex-start}
 #game.screen{padding:8px}
-canvas#cv{border-radius:14px;cursor:crosshair;border:4px solid var(--out);box-shadow:0 6px 0 var(--out),0 12px 24px rgba(0,0,0,.4);display:block}
+canvas#cv{border-radius:14px;cursor:crosshair;border:4px solid var(--out);box-shadow:0 6px 0 var(--out);display:block}
 #panel{width:292px;background:linear-gradient(180deg,#3a3530,#2c2824);border:4px solid var(--out);border-radius:14px;padding:10px 12px;font-size:14px;box-shadow:0 6px 0 var(--out),inset 0 1px 0 rgba(255,220,160,.12)}
 #panel h3{margin:10px 0 6px;font-size:15px;color:#ffc44a}
 #panel h3 small{color:var(--muted);font-weight:500;font-size:11px}
-.stats{display:grid;grid-template-columns:1fr 1fr 76px;gap:6px;align-items:stretch}
+.stats{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 76px;gap:6px;align-items:stretch;min-width:0}
+.stats>.stat.gold,.stats>.stat.inc,.stats>#audCtrl{min-width:0}
 .stats>.stat.gold{grid-column:1;grid-row:1}
 .stats>.stat.inc{grid-column:2;grid-row:1}
-.stats>#audCtrl{grid-column:3;grid-row:1/span 2;flex-direction:column;justify-content:center;align-items:stretch;gap:4px;margin:0;min-width:0}
+.stats>#audCtrl{grid-column:3;grid-row:1/span 2;flex-direction:column;justify-content:center;align-items:stretch;gap:4px;margin:0;min-width:0;max-width:100%;overflow:hidden}
 .stats>.stat.small:nth-child(4){grid-column:1;grid-row:2}
 .stats>.stat.small:nth-child(5){grid-column:2;grid-row:2}
 .stat{display:flex;justify-content:space-between;align-items:center;padding:2px 2px;font-size:15px}
@@ -142,7 +144,7 @@ button.danger{background:linear-gradient(#c45830,#8a2818);color:#fff}
 /* Compact the side panel so chat + key help stay on screen at 768 / 820 px tall.
    Roster tier icons are hidden here (they duplicate the Enemy send tiers row). */
 #roster .tiers{display:none}
-#panel{width:280px;padding:4px 6px;font-size:13px;max-height:calc(100vh - 8px);overflow-y:auto}
+#panel{width:280px;padding:4px 6px;font-size:13px;max-height:calc(100vh - 8px);overflow-x:hidden;overflow-y:auto}
 #panel h3{margin:2px 0 1px;font-size:12px}
 #panel h3 small{font-size:10px}
 .stats{gap:4px}
@@ -163,23 +165,28 @@ button.danger{background:linear-gradient(#c45830,#8a2818);color:#fff}
 #chatInput{margin-top:2px;padding:2px 6px;font-size:11px}
 #panel>.hint{font-size:9px;margin:1px 0 0;line-height:1.2}
 #game.screen{padding:4px 6px}
+#game button{box-shadow:0 4px 0 var(--out)}
+#game .btns button img{filter:none}
 
 /* lane-full overlay on send buttons */
 .scol{position:relative}
-.sbtn.lanefull{opacity:.55;filter:saturate(.65)}
-.laneov{position:absolute;left:0;right:0;top:4px;pointer-events:none;text-align:center;font-size:11px;font-weight:700;color:#ffc44a;-webkit-text-stroke:2.5px var(--out);paint-order:stroke fill;z-index:2;line-height:1.2}
+.sbtn.lanefull{opacity:.7}
+.laneov{position:absolute;left:3px;right:3px;top:4px;pointer-events:none;text-align:center;font-size:15px;font-weight:800;color:#fff6a8;background:rgba(26,21,18,.9);border:2px solid var(--out);border-radius:8px;padding:5px 6px;z-index:2;line-height:1.15;letter-spacing:.02em}
 .laneov[hidden]{display:none!important}
 
 /* sound controls — compact hammered-metal, matches the side panel */
-#audCtrl{align-items:stretch;gap:2px;margin:0;min-height:0}
+#audCtrl{align-items:stretch;gap:2px;margin:0;min-height:0;min-width:0;max-width:100%;padding:0 8px 0 2px;box-sizing:border-box;overflow:hidden}
 #muteBtn{padding:0 6px;min-width:28px;height:22px;font-size:13px;line-height:20px;border-radius:6px;border-width:2px;box-shadow:0 1px 0 var(--out)}
 #muteBtn[aria-pressed="true"]{background:linear-gradient(#4a3530,#2c201c);color:#ffc44a}
-#volSlider{flex:1;width:100%;accent-color:#ff8a20;height:14px;background:transparent}
+#volSlider{flex:1;width:100%;max-width:100%;margin:0;accent-color:#ff8a20;height:14px;background:transparent}
 
 @media (max-width:1024px){
   #game.screen{padding:2px}
   .gamewrap{gap:4px}
   #panel{width:252px;padding:4px 5px}
-  .stats{grid-template-columns:1fr 1fr 64px;gap:3px}
-  canvas#cv{border-width:3px;box-shadow:0 4px 0 var(--out),0 8px 16px rgba(0,0,0,.35)}
+  .stats{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 72px;gap:3px}
+  .stats .stat.gold,.stats .stat.inc{padding:2px 6px}
+  .stats .stat.small{white-space:normal;font-size:10px;line-height:1.15;flex-direction:column;align-items:flex-start;justify-content:center;gap:0}
+  #muteBtn{min-width:0;width:100%;padding:0 4px}
+  canvas#cv{border-width:3px;box-shadow:0 4px 0 var(--out)}
 }
