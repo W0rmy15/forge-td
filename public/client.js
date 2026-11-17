@@ -6,6 +6,8 @@
   const TEAMCOL = { L: '#4fa3ff', R: '#ff5d5d' };
 
   let ws = null, you = null, code = null, lobby = null;
+  let rejoinCode = null, retries = 0, retryTimer = null; // reconnect state (kept across retries)
+  let rosterSig = '', sellArm = null; // sellArm: {c,r,until} for two-step sell
   let state = null, prevState = null, stateAt = 0;
   let buildType = null, selected = null, hover = null; // hover: {b,c,r,fx,fy}
   let fx = []; // visual effects
@@ -16,10 +18,11 @@
   const params = new URLSearchParams(location.search);
   if (params.get('room')) $('codeInput').value = params.get('room').toUpperCase();
   const nameVal = () => { const n = $('name').value.trim() || 'Player'; localStorage.setItem('ftd_name', n); return n; };
-  $('createBtn').onclick = () => connect(() => sendMsg({ t: 'create', name: nameVal() }));
+  $('createBtn').onclick = () => { stopRetry(); connect(() => sendMsg({ t: 'create', name: nameVal() })); };
   $('joinBtn').onclick = () => {
     const c = $('codeInput').value.trim().toUpperCase();
     if (c.length !== 4) return ($('menuErr').textContent = 'Enter a 4-letter room code');
+    stopRetry();
     connect(() => sendMsg({ t: 'join', code: c, name: nameVal(), token: localStorage.getItem('ftd_token_' + c) }));
   };
   $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('joinBtn').click(); });
@@ -27,27 +30,52 @@
   function connect(onOpen) {
     if (ws && ws.readyState === 1) return onOpen();
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}`);
-    ws.onopen = onOpen;
-    ws.onmessage = (e) => onMsg(JSON.parse(e.data));
-    ws.onclose = () => {
-      if (code) {
-        toast('Disconnected — reconnecting…');
-        const c = code; code = null;
-        setTimeout(() => connect(() => sendMsg({ t: 'join', code: c, name: nameVal(), token: localStorage.getItem('ftd_token_' + c) })), 1500);
-      }
+    const sock = new WebSocket(`${proto}://${location.host}`);
+    ws = sock;
+    sock.onopen = onOpen;
+    sock.onmessage = (e) => { if (ws === sock) onMsg(JSON.parse(e.data)); };
+    sock.onclose = () => {
+      if (ws !== sock) return;
+      if (code) rejoinCode = code; // keep the room code across retries
+      code = null;
+      if (rejoinCode) scheduleRetry();
     };
   }
+  // reconnect with exponential backoff (1 s, 2 s, 4 s ... max 15 s), up to ~2 minutes
+  function scheduleRetry() {
+    clearTimeout(retryTimer);
+    if (retries >= 12) { toast('Could not reconnect. Check your connection and rejoin.'); rejoinCode = null; retries = 0; show('menu'); return; }
+    const delay = Math.min(15000, 1000 * Math.pow(2, retries)); retries++;
+    toast(`Disconnected — reconnecting in ${Math.round(delay / 1000)}s…`);
+    retryTimer = setTimeout(() => {
+      const c = rejoinCode; if (!c) return;
+      connect(() => sendMsg({ t: 'join', code: c, name: nameVal(), token: localStorage.getItem('ftd_token_' + c) }));
+    }, delay);
+  }
+  function stopRetry() { clearTimeout(retryTimer); rejoinCode = null; retries = 0; }
   function sendMsg(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
 
   function onMsg(m) {
     if (m.t === 'joined') {
-      you = m.you; code = m.code;
+      you = m.you; code = m.code; rejoinCode = null; retries = 0; clearTimeout(retryTimer);
+      if (m.rejoined) toast('Reconnected', true);
       localStorage.setItem('ftd_token_' + code, m.token);
       history.replaceState(null, '', '?room=' + code);
     } else if (m.t === 'lobby') { lobby = m; renderLobby(); }
-    else if (m.t === 's') { prevState = state; state = m; stateAt = performance.now(); onState(m); }
-    else if (m.t === 'err') { toast(m.msg); if (!code) $('menuErr').textContent = m.msg; }
+    else if (m.t === 's') {
+      // static tower lists are only sent when they change: reuse the last ones we have
+      for (const b of ['L', 'R']) if (!m.boards[b].towers) m.boards[b].towers = state && state.boards[b].towers ? state.boards[b].towers : [];
+      prevState = state; state = m; stateAt = performance.now(); onState(m);
+    }
+    else if (m.t === 'err') {
+      toast(m.msg);
+      if (m.code === 'noroom') { // room is gone: stop retrying and go back to the menu
+        const c = rejoinCode || code; stopRetry(); code = null; state = null; lobby = null;
+        if (c) localStorage.removeItem('ftd_token_' + c);
+        history.replaceState(null, '', location.pathname);
+        show('menu'); $('menuErr').textContent = m.msg;
+      } else if (!code) $('menuErr').textContent = m.msg;
+    }
     else if (m.t === 'chat') addChat(m);
   }
 
@@ -75,11 +103,14 @@
       $('readyBtn').classList.toggle('hidden', isHost);
       $('readyBtn').textContent = me && me.ready ? 'Not ready' : 'Ready';
       $('startBtn').classList.toggle('hidden', !isHost);
-      const canStart = ['L', 'R'].every((t) => lobby.players.some((p) => p.team === t)) && lobby.players.every((p) => p.ready || p.id === lobby.hostId);
+      const nL = lobby.players.filter((p) => p.team === 'L').length, nR = lobby.players.filter((p) => p.team === 'R').length;
+      const allReady = lobby.players.every((p) => p.ready || p.id === lobby.hostId || !p.connected);
+      const canStart = nL > 0 && nL === nR && allReady;
       $('startBtn').disabled = !canStart;
-      $('lobbyErr').textContent = canStart || !isHost ? '' : 'Need a player on each team and everyone ready.';
+      $('lobbyErr').textContent = canStart || !isHost ? '' : nL !== nR || !nL ? `Teams must be even and non-empty (now ${nL}v${nR}).` : 'Waiting for everyone to be ready.';
     } else {
       show('game');
+      rosterSig = '';
       const isHost = lobby.hostId === you;
       $('backBtn').classList.toggle('hidden', !isHost);
       $('overWait').classList.toggle('hidden', isHost);
@@ -96,7 +127,7 @@
   }
   for (const [k, t] of Object.entries(S.SENDS)) {
     const b = document.createElement('button');
-    b.innerHTML = `<span class="k">${t.key.toUpperCase()}</span> ${t.name}<br>${t.cost}g +${t.income}`; b.title = `${t.desc}: ${t.count}× ${t.hp}hp`;
+    b.innerHTML = `<span class="k">${t.key.toUpperCase()}</span> ${t.name}<br>${t.cost}g +${t.income}`; b.title = `${t.desc}: ${t.count}× ${Math.round(t.hpMult * 100)}% of a wave creep's HP. Income gain shrinks as your send income grows.`;
     b.onclick = () => sendMsg({ t: 'send', kind: k });
     $('sendBtns').appendChild(b); sendBtns[k] = b;
   }
@@ -110,28 +141,43 @@
     $('nextIncome').textContent = Math.ceil(s.nextIncome) + 's';
     $('wave').textContent = s.wave; $('nextWave').textContent = Math.ceil(s.nextWave) + 's';
     for (const [k, t] of Object.entries(S.TOWERS)) { buildBtns[k].classList.toggle('active', buildType === k); buildBtns[k].disabled = m.gold < t.cost; }
-    for (const [k, t] of Object.entries(S.SENDS)) sendBtns[k].disabled = m.gold < t.cost;
-    $('roster').innerHTML = ['L', 'R'].map((t) =>
-      `<div style="color:${TEAMCOL[t]}"><b>${t === 'L' ? 'Left' : 'Right'}</b> — ❤️ ${s.boards[t].lives}</div>` +
-      s.players.filter((p) => p.team === t).map((p) =>
-        `<div><span class="dot" style="background:${p.color}"></span>${esc(p.name)}${p.id === you ? ' (you)' : ''}${p.connected ? '' : ' (offline)'} ${p.team === m.team ? `· ${p.gold}g` : ''} · +${p.income}</div>`).join('')).join('');
+    const capped = (m.sw || 0) >= S.SEND_CAP_PER_WAVE;
+    for (const [k, t] of Object.entries(S.SENDS)) sendBtns[k].disabled = m.gold < t.cost || capped;
+    $('sendsWave').textContent = `${m.sw || 0}/${S.SEND_CAP_PER_WAVE}`;
+    const enemy = m.team === 'L' ? 'R' : 'L';
+    $('sendsQueued').textContent = s.boards[enemy].queuedSends || 0;
+    $('sendsOnMe').textContent = s.boards[m.team].queuedSends || 0;
+    // roster: only touch the DOM when something visible changed
+    const sig = JSON.stringify([s.boards.L.lives, s.boards.R.lives, s.players.map((p) => [p.id, p.name, p.team, p.connected, p.gold, p.income])]);
+    if (sig !== rosterSig) {
+      rosterSig = sig;
+      $('roster').innerHTML = ['L', 'R'].map((t) =>
+        `<div style="color:${TEAMCOL[t]}"><b>${t === 'L' ? 'Left' : 'Right'}</b> — ❤️ ${s.boards[t].lives}</div>` +
+        s.players.filter((p) => p.team === t).map((p) =>
+          `<div><span class="dot" style="background:${p.color}"></span>${esc(p.name)}${p.id === you ? ' (you)' : ''}${p.connected ? '' : ' (offline)'} ${p.gold !== undefined ? `· ${p.gold}g` : ''} · +${p.income}</div>`).join('')).join('');
+    }
     // selection panel
     renderSel();
     // effects from events
     for (const e of s.ev) {
       if (e.k === 'shot') fx.push({ k: 'shot', ...e, t0: performance.now(), dur: e.tt === 'cannon' ? 220 : 120 });
-      else if (e.k === 'boom') fx.push({ ...e, t0: performance.now(), dur: 300 });
+      else if (e.k === 'boom' || e.k === 'chill') fx.push({ ...e, t0: performance.now(), dur: 300 });
+      else if (e.k === 'sudden') toast('SUDDEN DEATH: waves get much stronger and leaks cost double!');
+      else if (e.k === 'send' && e.id === you) { toast(`Sent ${S.SENDS[e.kind].name}${S.SENDS[e.kind].count > 1 ? ' ×' + S.SENDS[e.kind].count : ''} (${e.n}/${S.SEND_CAP_PER_WAVE} this wave)`, true); flashBtn(sendBtns[e.kind]); }
+      else if (e.k === 'send' && e.team === m.team) toast(`${e.name} sent ${S.SENDS[e.kind].name}`, true);
       else if (e.k === 'wave') toast(e.boss ? `Wave ${e.n}: BOSS incoming!` : `Wave ${e.n} incoming`, true);
       else if (e.k === 'send' && e.team !== m.team) toast(`${e.name} sent ${S.SENDS[e.kind].name}s at you!`);
     }
     if (s.phase === 'over' || s.winner) {
       $('over').classList.remove('hidden');
       $('overText').textContent = s.winner === 'draw' ? 'Draw!' : s.winner === m.team ? '🏆 Victory!' : '💀 Defeat';
+      $('overReason').textContent = s.winReason || '';
       $('overStats').innerHTML = s.players.map((p) => `<div><span class="dot" style="background:${p.color}"></span>${esc(p.name)} (${p.team}) — kills ${p.kills}, sent ${p.sent}, income ${p.income}</div>`).join('');
     } else $('over').classList.add('hidden');
   }
 
-  function towerAt(b, c, r) { if (!state) return null; const t = state.boards[b].towers.find((t) => t[1] === c && t[2] === r); return t ? { id: t[0], c: t[1], r: t[2], type: t[3], lvl: t[4], owner: t[5] } : null; }
+  function flashBtn(b) { if (!b) return; b.classList.add('flash'); setTimeout(() => b.classList.remove('flash'), 250); }
+  function towerAt(b, c, r) { if (!state) return null; const t = state.boards[b].towers.find((t) => t[1] === c && t[2] === r); return t ? { id: t[0], c: t[1], r: t[2], type: t[3], lvl: t[4], owner: t[5], selling: !!t[6] } : null; }
 
   function renderSel() {
     const m = me();
@@ -144,17 +190,27 @@
     const mine = t.owner === you;
     const owner = state.players.find((p) => p.id === t.owner);
     const nx = up !== null ? spec.levels[t.lvl + 1] : null;
+    const armed = sellArm && sellArm.c === t.c && sellArm.r === t.r && performance.now() < sellArm.until;
+    const busy = state.boards[m.team].creeps.length > 0;
     const html = `<b>${spec.name}</b> Lv ${t.lvl + 1}/3 ${mine ? '' : `<small>(${esc(owner ? owner.name : '?')}'s)</small>`}<br>
-      <small>Dmg ${st.dmg}${nx ? '→' + nx.dmg : ''} · Range ${st.range}${st.splash ? ' · Splash ' + st.splash : ''}${st.slow ? ' · Slow ' + Math.round(st.slow * 100) + '%' : ''}</small>
-      ${mine ? `<div class="row"><button id="upBtn" ${up === null || m.gold < up ? 'disabled' : ''}>[U] Upgrade ${up === null ? 'MAX' : up + 'g'}</button><button id="sellBtn">[X] Sell ${sell}g</button></div>` : ''}`;
+      <small>Dmg ${st.dmg}${nx ? '→' + nx.dmg : ''} · Range ${st.range}${st.splash ? ' · Splash ' + st.splash : ''}${st.slow ? ' · Slow ' + Math.round(st.slow * 100) + '% (area ' + st.area + ')' : ''}</small>
+      ${t.selling ? '<div class="row"><small>Selling…</small></div>' : mine ? `<div class="row"><button id="upBtn" ${up === null || m.gold < up ? 'disabled' : ''}>[U] Upgrade ${up === null ? 'MAX' : up + 'g'}</button><button id="sellBtn" class="${armed ? 'danger' : ''}">${armed ? 'Confirm sell?' : `[X] Sell ${sell}g`}</button></div>${busy ? `<small class="hint">Creeps on board: sale takes ${S.SELL_DELAY}s, tower stops firing</small>` : ''}` : ''}`;
     if (el.dataset.html !== html) {
       el.innerHTML = html; el.dataset.html = html;
-      if (mine) { $('upBtn').onclick = doUpgrade; $('sellBtn').onclick = doSell; }
+      if ($('upBtn')) $('upBtn').onclick = doUpgrade; if ($('sellBtn')) $('sellBtn').onclick = doSell;
     }
     el.classList.remove('hidden');
   }
   function doUpgrade() { if (selected) sendMsg({ t: 'upgrade', c: selected.c, r: selected.r }); }
-  function doSell() { if (selected) { sendMsg({ t: 'sell', c: selected.c, r: selected.r }); selected = null; } }
+  // two-step sell: first press arms, second press within 2.5 s confirms
+  function doSell() {
+    if (!selected) return;
+    const now = performance.now();
+    if (sellArm && sellArm.c === selected.c && sellArm.r === selected.r && now < sellArm.until) {
+      sendMsg({ t: 'sell', c: selected.c, r: selected.r }); sellArm = null; selected = null;
+    } else { sellArm = { c: selected.c, r: selected.r, until: now + 2500 }; toast('Press X / Sell again to confirm', true); setTimeout(renderSel, 2600); }
+    renderSel();
+  }
 
   // ---------- input ----------
   const cv = $('cv'), ctx = cv.getContext('2d');
@@ -223,11 +279,19 @@
     }
     return distCache;
   }
+  // mirrors the server's canBuild: spawn/base, path blocking, and creeps in the cell or trapped by it
   function wouldBlock(b, c, r) {
     if ((c === S.SPAWN.c && r === S.SPAWN.r) || (c === S.BASE.c && r === S.BASE.r)) return true;
+    const creeps = state.boards[b].creeps;
+    for (const cr of creeps) { // creep occupies the cell it is in (or is about to enter)
+      const cc = Math.floor(cr[2]), rr = Math.floor(cr[3]);
+      if (Math.abs(cr[2] - (c + 0.5)) < 1 && Math.abs(cr[3] - (r + 0.5)) < 1 && (cc === c || rr === r)) return true;
+    }
     const set = new Set(state.boards[b].towers.map((t) => t[1] + ',' + t[2])); set.add(c + ',' + r);
     const d = S.computeDist((cc, rr) => set.has(cc + ',' + rr));
-    return d[S.SPAWN.c + S.SPAWN.r * S.COLS] < 0;
+    if (d[S.SPAWN.c + S.SPAWN.r * S.COLS] < 0) return true;
+    for (const cr of creeps) { const cc = Math.floor(cr[2]), rr = Math.floor(cr[3]); if (cc >= 0 && rr >= 0 && cc < S.COLS && rr < S.ROWS && d[cc + rr * S.COLS] < 0) return true; }
+    return false;
   }
 
   function drawTower(x, y, type, lvl, ownerColor, alpha) {
@@ -285,7 +349,7 @@
       ctx.fillText('🏰', x0 + (S.BASE.c + 0.5) * CELL, TOP + (S.BASE.r + 0.5) * CELL + 5);
       ctx.fillText('🌀', x0 + (S.SPAWN.c + 0.5) * CELL, TOP + (S.SPAWN.r + 0.5) * CELL + 5);
       // towers
-      for (const t of B.towers) { const o = pmap.get(t[5]); drawTower(x0 + t[1] * CELL, TOP + t[2] * CELL, t[3], t[4], o ? o.color : '#888'); }
+      for (const t of B.towers) { const o = pmap.get(t[5]); drawTower(x0 + t[1] * CELL, TOP + t[2] * CELL, t[3], t[4], o ? o.color : '#888', t[6] ? 0.35 : 1); }
       // selected
       if (selected && m && m.team === b) {
         const t = towerAt(b, selected.c, selected.r);
@@ -326,6 +390,9 @@
         const px = x1 + (x2 - x1) * k, py = y1 + (y2 - y1) * k;
         ctx.fillStyle = col; ctx.beginPath(); ctx.arc(px, py, f.tt === 'cannon' ? 4 : 2.5, 0, 7); ctx.fill();
         if (f.tt === 'frost') { ctx.strokeStyle = 'rgba(111,211,255,0.4)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(px, py); ctx.stroke(); }
+      } else if (f.k === 'chill') {
+        ctx.beginPath(); ctx.arc(x0 + f.x * CELL, TOP + f.y * CELL, f.r * CELL * (0.5 + 0.5 * k), 0, 7);
+        ctx.fillStyle = `rgba(111,211,255,${0.25 * (1 - k)})`; ctx.fill();
       } else if (f.k === 'boom') {
         ctx.beginPath(); ctx.arc(x0 + f.x * CELL, TOP + f.y * CELL, f.r * CELL * (0.4 + 0.6 * k), 0, 7);
         ctx.fillStyle = `rgba(255,170,60,${0.45 * (1 - k)})`; ctx.fill();
@@ -340,6 +407,9 @@
     }
   }
   requestAnimationFrame(render);
+
+  // read-only hooks for the headless smoke test
+  window.__ftdState = () => state; window.__ftdWouldBlock = (b, c, r) => wouldBlock(b, c, r);
 
   // auto-join if room in URL and we have a token (refresh case)
   const urlRoom = params.get('room');

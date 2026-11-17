@@ -18,7 +18,7 @@ function mk(i) {
       const m = JSON.parse(d);
       if (m.t === 'joined') { bot.id = m.you; code = m.code; }
       else if (m.t === 'lobby') bot.lobby = m;
-      else if (m.t === 's') { bot.state = m; if (i === 0) { states++; lastState = m; maxCreeps = Math.max(maxCreeps, m.boards.L.creeps.length + m.boards.R.creeps.length); } }
+      else if (m.t === 's') { for (const b of ['L', 'R']) if (!m.boards[b].towers) m.boards[b].towers = bot.state ? bot.state.boards[b].towers : []; bot.state = m; if (i === 0) { states++; lastState = m; maxCreeps = Math.max(maxCreeps, m.boards.L.creeps.length + m.boards.R.creeps.length); } }
       else if (m.t === 'err') errors.push(`bot${i}: ${m.msg}`);
     });
     bots.push(bot);

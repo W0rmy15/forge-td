@@ -28,7 +28,7 @@
   </div>
   <div class="row center"><button id="readyBtn" class="big">Ready</button><button id="startBtn" class="big hidden">Start game</button></div>
   <div id="lobbyErr" class="err"></div>
-  <p class="hint">1–2 players per team. Teammates share a maze and defend together. The host starts when everyone is ready.</p>
+  <p class="hint">1v1 or 2v2 (teams must be even). Teammates share a maze and defend together. The host starts when everyone is ready.</p>
 </div>
 
 <div id="game" class="screen hidden">
@@ -43,15 +43,18 @@
       <div id="buildBtns" class="btns"></div>
       <h3>Send creeps <small>(+income)</small></h3>
       <div id="sendBtns" class="btns"></div>
+      <div class="stat small"><span>Your sends this wave</span><b id="sendsWave">0</b></div>
+      <div class="stat small"><span>Your team's sends queued at enemy</span><b id="sendsQueued">0</b></div>
+      <div class="stat small"><span>Enemy sends queued at you</span><b id="sendsOnMe">0</b></div>
       <div id="sel" class="sel hidden"></div>
       <h3>Players</h3>
       <div id="roster"></div>
       <div id="chatLog"></div>
       <input id="chatInput" placeholder="Enter to chat" maxlength="120">
-      <p class="hint">Keys: 1/2/3 tower · Q/W/E send · U upgrade · X sell · Esc cancel</p>
+      <p class="hint">Keys: 1/2/3 tower · Q/W/E send · U upgrade · X twice to sell · Esc cancel</p>
     </div>
   </div>
-  <div id="over" class="overlay hidden"><div class="card"><h1 id="overText"></h1><div id="overStats"></div><button id="backBtn" class="big hidden">Back to lobby</button><p id="overWait" class="hint">Waiting for host…</p></div></div>
+  <div id="over" class="overlay hidden"><div class="card"><h1 id="overText"></h1><p id="overReason" class="hint"></p><div id="overStats"></div><button id="backBtn" class="big hidden">Back to lobby</button><p id="overWait" class="hint">Waiting for host…</p></div></div>
 </div>
 <div id="toast"></div>
 <script src="shared.js"></script>

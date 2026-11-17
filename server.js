@@ -1,27 +1,40 @@
-// Forge TD - server-authoritative versus tower defense
+// Forge TD - server-authoritative versus tower defense (HTTP static files + WebSocket game server)
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const S = require('./public/shared.js');
+const G = require('./game.js');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
-const TICK = 50; // ms (20 Hz)
-const DT = TICK / 1000;
-const SPEED = Math.max(1, parseInt(process.env.SPEED || '1', 10)); // sim steps per tick (testing only)
+const SPEED = Math.min(50, Math.max(1, parseInt(process.env.SPEED || '1', 10))); // sim steps per tick (testing only)
 const PUB = path.join(__dirname, 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
+// ---- abuse limits (override with env vars) ----
+const LIMITS = {
+  MAX_PAYLOAD: 4096,                                               // bytes per WebSocket message
+  MAX_CONNECTIONS: parseInt(process.env.MAX_CONNECTIONS || '400', 10),
+  MAX_CONN_PER_IP: parseInt(process.env.MAX_CONN_PER_IP || '24', 10),
+  MAX_ROOMS: parseInt(process.env.MAX_ROOMS || '150', 10),
+  JOIN_TIMEOUT_MS: parseInt(process.env.JOIN_TIMEOUT_MS || '30000', 10),                                         // sockets that never create/join a room are closed
+  MSG_RATE: parseInt(process.env.MSG_RATE || '30', 10), MSG_BURST: parseInt(process.env.MSG_BURST || '60', 10),                                    // token bucket: all messages
+  CHAT_RATE: 2, CHAT_BURST: 4,                                     // token bucket: chat
+  DROP_LIMIT: 100,                                                 // over-limit messages (per 15 s) before disconnect
+};
+const KEYFRAME_TICKS = 100; // resend static tower data at least every 5 s
+
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url, 'http://x');
+  let url;
+  try { url = new URL(req.url, 'http://x'); } catch (e) { res.writeHead(400); return res.end(); }
   if (url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, rooms: rooms.size, uptime: process.uptime() }));
+    return res.end(JSON.stringify({ ok: true, version: S.VERSION, rooms: rooms.size, clients: wss.clients.size, uptime: process.uptime() }));
   }
-  let p = url.pathname === '/' ? '/index.html' : url.pathname;
+  const p = url.pathname === '/' ? '/index.html' : url.pathname;
   const fp = path.normalize(path.join(PUB, p));
-  if (!fp.startsWith(PUB)) { res.writeHead(403); return res.end(); }
+  if (!fp.startsWith(PUB + path.sep)) { res.writeHead(403); return res.end(); }
   fs.readFile(fp, (err, data) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(fp)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
@@ -29,21 +42,32 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, maxPayload: LIMITS.MAX_PAYLOAD });
 const rooms = new Map();
+const ipCounts = new Map();
 let nextId = 1;
 const PLAYER_COLORS = ['#4fa3ff', '#ffd166', '#ff6b6b', '#7bed9f', '#c58bff', '#ff9f43'];
+
+// ---- logging with flood protection: the same message key is logged at most once per 30 s ----
+function log(s) { console.log(new Date().toISOString() + ' ' + s); }
+const logSeen = new Map();
+function logOnce(k, s) {
+  const now = Date.now(), last = logSeen.get(k);
+  if (last && now - last.t < 30000) { last.n++; return; }
+  const extra = last && last.n ? ` (repeated ${last.n}x since last report)` : '';
+  logSeen.set(k, { t: now, n: 0 });
+  log(s + extra);
+}
 
 function makeCode() {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   let c;
-  do { c = Array.from({ length: 4 }, () => A[Math.floor(Math.random() * A.length)]).join(''); } while (rooms.has(c));
+  do { c = Array.from({ length: 4 }, () => A[crypto.randomInt(A.length)]).join(''); } while (rooms.has(c));
   return c;
 }
-function send(ws, msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
-function cleanName(n) { return String(n || '').replace(/[^\w \-.!?']/g, '').trim().slice(0, 16) || 'Player'; }
+function send(ws, msg) { if (ws && ws.readyState === 1) ws.send(typeof msg === 'string' ? msg : JSON.stringify(msg)); }
+function cleanName(n) { return String(typeof n === 'string' ? n : '').replace(/[^\w \-.!?']/g, '').trim().slice(0, 16) || 'Player'; }
 function teamCount(room, team) { let n = 0; for (const p of room.players.values()) if (p.team === team) n++; return n; }
-const other = (t) => (t === 'L' ? 'R' : 'L');
 
 function lobbyMsg(room) {
   return {
@@ -51,206 +75,102 @@ function lobbyMsg(room) {
     players: [...room.players.values()].map((p) => ({ id: p.id, name: p.name, team: p.team, ready: p.ready, connected: p.connected, color: p.color })),
   };
 }
-function broadcast(room, msg) { const s = JSON.stringify(msg); for (const p of room.players.values()) if (p.ws && p.ws.readyState === 1) p.ws.send(s); }
+function broadcast(room, msg) { const s = JSON.stringify(msg); for (const p of room.players.values()) send(p.ws, s); }
 function broadcastLobby(room) { broadcast(room, lobbyMsg(room)); }
 
-function addPlayer(room, ws, name, token) {
+// host must always be a connected player when one exists
+function ensureHost(room) {
+  const h = room.players.get(room.hostId);
+  if (h && h.connected) return;
+  const c = [...room.players.values()].find((p) => p.connected);
+  if (c) room.hostId = c.id;
+  else if (!h) room.hostId = room.players.size ? room.players.keys().next().value : null;
+}
+
+function addPlayer(room, ws, name) {
   const id = nextId++;
   const team = teamCount(room, 'L') <= teamCount(room, 'R') ? 'L' : 'R';
   const usedColors = new Set([...room.players.values()].map((p) => p.color));
   const color = PLAYER_COLORS.find((c) => !usedColors.has(c)) || PLAYER_COLORS[0];
-  const p = { id, token: token || crypto.randomBytes(12).toString('hex'), name, team, ready: false, ws, connected: true, color, gold: 0, income: 0, cursor: null, sent: 0, kills: 0 };
+  const p = { id, token: crypto.randomBytes(12).toString('hex'), name, team, ready: false, ws, connected: true, color, gold: 0, income: 0, cursor: null, sent: 0, kills: 0, sendsThisWave: 0, sendIncome: 0, incomeFrac: 0 };
   room.players.set(id, p);
-  if (!room.hostId) room.hostId = id;
+  ensureHost(room);
   return p;
 }
 
-// ---------------- game simulation ----------------
-function newBoard() { return { lives: S.LIVES, towers: new Map(), creeps: [], queue: [], dist: S.computeDist(() => false), leakFlash: 0 }; }
+function resetToLobby(room) {
+  room.phase = 'lobby'; room.game = null; room.tick = 0; room.sentTv = null;
+  for (const [id, p] of room.players) if (!p.connected) room.players.delete(id);
+  for (const p of room.players.values()) { p.ready = false; p.cursor = null; }
+  ensureHost(room);
+}
+
 function startGame(room) {
-  room.phase = 'game';
-  room.game = { time: 0, boards: { L: newBoard(), R: newBoard() }, nextIncome: S.INCOME_EVERY, nextWave: S.FIRST_WAVE, wave: 0, events: [], winner: null, nextCreepId: 1, nextTowerId: 1 };
-  for (const p of room.players.values()) { p.gold = S.START_GOLD; p.income = S.START_INCOME; p.sent = 0; p.kills = 0; p.ready = false; }
-  log(`room ${room.code} started with ${room.players.size} players`);
+  room.phase = 'game'; room.tick = 0; room.sentTv = { L: -1, R: -1 };
+  G.createGame(room);
+  log(`room ${room.code} started with ${room.players.size} players (team size ${room.game.teamSize})`);
 }
-const key = (c, r) => c + ',' + r;
 
-function recomputeDist(b) { b.dist = S.computeDist((c, r) => b.towers.has(key(c, r))); }
-
-function canBuild(b, c, r) {
-  if (!Number.isInteger(c) || !Number.isInteger(r) || c < 0 || r < 0 || c >= S.COLS || r >= S.ROWS) return 'Out of bounds';
-  if ((c === S.SPAWN.c && r === S.SPAWN.r) || (c === S.BASE.c && r === S.BASE.r)) return 'Cannot build on spawn/base';
-  if (b.towers.has(key(c, r))) return 'Occupied';
-  for (const cr of b.creeps) {
-    if ((cr.c === c && cr.r === r) || (cr.nc === c && cr.nr === r)) return 'A creep is in the way';
+// ---------------- state snapshots ----------------
+// Static tower data is only included when it changed (or every KEYFRAME_TICKS, or for a fresh socket).
+// Enemy gold is never sent.
+function boardsMsg(room, full) {
+  const g = room.game, out = {};
+  for (const t of ['L', 'R']) {
+    const b = g.boards[t];
+    const o = {
+      lives: b.lives, leak: b.leakFlash > 0 ? 1 : 0, tv: b.towerVer,
+      creeps: b.creeps.map((c) => [c.id, c.kind, +c.x.toFixed(2), +c.y.toFixed(2), Math.ceil(c.hp), c.maxHp, g.time < c.slowUntil ? 1 : 0, c.radius]),
+      queued: b.queue.length, queuedSends: b.queue.reduce((n, q) => n + (q.from ? 1 : 0), 0),
+    };
+    if (full || room.sentTv[t] !== b.towerVer) {
+      o.towers = [...b.towers.values()].map((tw) => [tw.id, tw.c, tw.r, tw.type, tw.lvl, tw.owner, tw.sellAt !== null ? 1 : 0]);
+    }
+    out[t] = o;
   }
-  const d = S.computeDist((cc, rr) => (cc === c && rr === r) || b.towers.has(key(cc, rr)));
-  if (d[S.SPAWN.c + S.SPAWN.r * S.COLS] < 0) return 'That would block the path!';
-  for (const cr of b.creeps) if (d[cr.c + cr.r * S.COLS] < 0) return 'That would trap a creep';
-  return null;
+  return out;
 }
-
-function spawnCreep(g, b, spec) {
-  b.creeps.push({
-    id: g.nextCreepId++, kind: spec.kind, hp: spec.hp, maxHp: spec.hp, speed: spec.speed, bounty: spec.bounty, leak: spec.leak, radius: spec.radius,
-    c: S.SPAWN.c, r: S.SPAWN.r, nc: null, nr: null, x: S.SPAWN.c + 0.5, y: S.SPAWN.r + 0.5, slowUntil: 0, slowAmt: 0, from: spec.from || null,
+function playersFor(room, team) {
+  return [...room.players.values()].map((p) => {
+    const o = { id: p.id, name: p.name, team: p.team, income: p.income, color: p.color, cursor: p.cursor, connected: p.connected, sent: p.sent, kills: p.kills };
+    if (p.team === team || room.phase === 'over') { o.gold = Math.floor(p.gold); o.sw = p.sendsThisWave; }
+    return o;
   });
 }
-
-function queueWave(g) {
-  g.wave++;
-  const n = g.wave;
-  const boss = n % 5 === 0;
-  const hp = Math.round(25 * Math.pow(1.24, n - 1));
-  for (const t of ['L', 'R']) {
-    const b = g.boards[t];
-    const count = Math.min(6 + n, 22);
-    for (let i = 0; i < count; i++) b.queue.push({ at: g.time + i * 0.6, kind: 'neutral', hp, speed: n % 3 === 0 ? 1.7 : 1.25, bounty: 1 + Math.floor(n / 3), leak: 1, radius: 0.24 });
-    if (boss) b.queue.push({ at: g.time + count * 0.6 + 0.5, kind: 'boss', hp: hp * 14, speed: 0.8, bounty: 10 + n * 2, leak: 4, radius: 0.42 });
-  }
-  g.events.push({ k: 'wave', n, boss });
-}
-
-function doSend(room, p, kind) {
-  const g = room.game, spec = S.SENDS[kind];
-  if (!spec) return 'Unknown send';
-  if (p.gold < spec.cost) return 'Not enough gold';
-  p.gold -= spec.cost; p.income += spec.income; p.sent++;
-  const b = g.boards[other(p.team)];
-  const hpMult = 1 + 0.12 * g.wave;
-  const last = b.queue.reduce((m, q) => Math.max(m, q.at), g.time);
-  const start = Math.max(g.time, Math.min(last, g.time + 3)); // don't wait too long behind waves
-  for (let i = 0; i < spec.count; i++) {
-    b.queue.push({ at: start + i * 0.25, kind, hp: Math.round(spec.hp * hpMult), speed: spec.speed, bounty: spec.bounty, leak: spec.leak, radius: spec.radius, from: p.id });
-  }
-  g.events.push({ k: 'send', team: p.team, kind, name: p.name });
-  return null;
-}
-
-function stepBoard(room, team) {
-  const g = room.game, b = g.boards[team];
-  // spawn queue
-  if (b.queue.length) {
-    b.queue.sort((a, c) => a.at - c.at);
-    while (b.queue.length && b.queue[0].at <= g.time) spawnCreep(g, b, b.queue.shift());
-  }
-  // move creeps
-  const survivors = [];
-  for (const cr of b.creeps) {
-    let speed = cr.speed * (g.time < cr.slowUntil ? 1 - cr.slowAmt : 1);
-    let step = speed * DT;
-    let leaked = false;
-    while (step > 0) {
-      if (cr.c === S.BASE.c && cr.r === S.BASE.r) { leaked = true; break; }
-      if (cr.nc === null) {
-        const n = S.nextCell(b.dist, cr.c, cr.r);
-        if (!n) break; // stuck (should not happen)
-        cr.nc = n.c; cr.nr = n.r;
-      }
-      const tx = cr.nc + 0.5, ty = cr.nr + 0.5;
-      const dx = tx - cr.x, dy = ty - cr.y, dd = Math.hypot(dx, dy);
-      if (dd <= step) {
-        cr.x = tx; cr.y = ty; step -= dd; cr.c = cr.nc; cr.r = cr.nr; cr.nc = null; cr.nr = null;
-      } else { cr.x += (dx / dd) * step; cr.y += (dy / dd) * step; step = 0; }
-    }
-    if (leaked) {
-      b.lives = Math.max(0, b.lives - cr.leak);
-      b.leakFlash = 0.5;
-      g.events.push({ k: 'leak', team, n: cr.leak });
-    } else survivors.push(cr);
-  }
-  b.creeps = survivors;
-  if (b.leakFlash > 0) b.leakFlash -= DT;
-  // towers fire
-  for (const t of b.towers.values()) {
-    t.cd -= DT;
-    if (t.cd > 0) continue;
-    const st = S.TOWERS[t.type].levels[t.lvl];
-    const tx = t.c + 0.5, ty = t.r + 0.5;
-    let target = null, best = Infinity;
-    for (const cr of b.creeps) {
-      if (cr.hp <= 0) continue;
-      if (Math.hypot(cr.x - tx, cr.y - ty) > st.range) continue;
-      const prog = b.dist[cr.c + cr.r * S.COLS];
-      const score = (prog < 0 ? 999 : prog) - (cr.hp / cr.maxHp) * 0.01;
-      if (score < best) { best = score; target = cr; }
-    }
-    if (!target) continue;
-    t.cd = st.rate;
-    g.events.push({ k: 'shot', b: team, tt: t.type, x1: +tx.toFixed(2), y1: +ty.toFixed(2), x2: +target.x.toFixed(2), y2: +target.y.toFixed(2) });
-    if (t.type === 'cannon') {
-      for (const cr of b.creeps) if (cr.hp > 0 && Math.hypot(cr.x - target.x, cr.y - target.y) <= st.splash) damage(room, b, cr, st.dmg, t);
-      g.events.push({ k: 'boom', b: team, x: +target.x.toFixed(2), y: +target.y.toFixed(2), r: st.splash });
-    } else {
-      if (t.type === 'frost') { const active = g.time < target.slowUntil; target.slowAmt = active ? Math.max(st.slow, target.slowAmt) : st.slow; target.slowUntil = Math.max(target.slowUntil, g.time + st.slowDur); }
-      damage(room, b, target, st.dmg, t);
-    }
-  }
-  b.creeps = b.creeps.filter((c) => c.hp > 0);
-}
-
-function damage(room, b, cr, dmg, tower) {
-  if (cr.hp <= 0) return;
-  cr.hp -= dmg;
-  if (cr.hp <= 0) {
-    const owner = room.players.get(tower.owner);
-    if (owner) { owner.gold += cr.bounty; owner.kills++; }
-    tower.kills = (tower.kills || 0) + 1;
-  }
-}
-
-function stepGame(room) {
+function stateFor(room, team, boards) {
   const g = room.game;
-  g.time += DT;
-  g.nextIncome -= DT;
-  if (g.nextIncome <= 0) {
-    g.nextIncome += S.INCOME_EVERY;
-    for (const p of room.players.values()) p.gold += p.income;
-    g.events.push({ k: 'income' });
-  }
-  g.nextWave -= DT;
-  if (g.nextWave <= 0) { g.nextWave += S.WAVE_EVERY; queueWave(g); }
-  stepBoard(room, 'L');
-  stepBoard(room, 'R');
-  const lL = g.boards.L.lives, lR = g.boards.R.lives;
-  if (lL <= 0 || lR <= 0) {
-    g.winner = lL <= 0 && lR <= 0 ? 'draw' : lL <= 0 ? 'R' : 'L';
-    room.phase = 'over';
-    log(`room ${room.code} game over, winner ${g.winner}`);
-    broadcastLobby(room);
-  }
+  return JSON.stringify({
+    t: 's', phase: room.phase, time: +g.time.toFixed(2), wave: g.wave, nextIncome: +g.nextIncome.toFixed(1), nextWave: +g.nextWave.toFixed(1),
+    winner: g.winner, winReason: g.winReason, sd: g.suddenDeath ? 1 : 0, teamSize: g.teamSize,
+    boards, ev: g.events, players: playersFor(room, team),
+  });
 }
-
-function stateMsg(room) {
-  const g = room.game;
-  const boards = {};
-  for (const t of ['L', 'R']) {
-    const b = g.boards[t];
-    boards[t] = {
-      lives: b.lives, leak: b.leakFlash > 0 ? 1 : 0,
-      towers: [...b.towers.values()].map((tw) => [tw.id, tw.c, tw.r, tw.type, tw.lvl, tw.owner]),
-      creeps: b.creeps.map((c) => [c.id, c.kind, +c.x.toFixed(2), +c.y.toFixed(2), Math.ceil(c.hp), c.maxHp, g.time < c.slowUntil ? 1 : 0, c.radius]),
-      queued: b.queue.length,
-    };
-  }
-  return {
-    t: 's', phase: room.phase, time: +g.time.toFixed(2), wave: g.wave, nextIncome: +g.nextIncome.toFixed(1), nextWave: +g.nextWave.toFixed(1), winner: g.winner,
-    boards, ev: g.events,
-    players: [...room.players.values()].map((p) => ({ id: p.id, name: p.name, team: p.team, gold: p.gold, income: p.income, color: p.color, cursor: p.cursor, connected: p.connected, sent: p.sent, kills: p.kills })),
-  };
+function broadcastState(room, forceFull) {
+  const full = forceFull || room.tick % KEYFRAME_TICKS === 0;
+  const boards = boardsMsg(room, full);
+  const msgs = { L: stateFor(room, 'L', boards), R: stateFor(room, 'R', boards) };
+  for (const p of room.players.values()) send(p.ws, msgs[p.team]);
+  room.sentTv = { L: room.game.boards.L.towerVer, R: room.game.boards.R.towerVer };
+}
+function sendFullState(room, p) {
+  if (!room.game) return;
+  send(p.ws, stateFor(room, p.team, boardsMsg(room, true)));
 }
 
 // ---------------- message handling ----------------
+const isInt = (v) => Number.isInteger(v);
 function handle(ws, msg) {
+  if (typeof msg.t !== 'string') return;
   const room = ws.roomCode ? rooms.get(ws.roomCode) : null;
   const p = room ? room.players.get(ws.playerId) : null;
   switch (msg.t) {
     case 'create': {
       if (room) return;
+      if (rooms.size >= LIMITS.MAX_ROOMS) return send(ws, { t: 'err', msg: 'Server is full, try again later' });
       const code = makeCode();
-      const r = { code, hostId: null, players: new Map(), phase: 'lobby', game: null, emptySince: null };
+      const r = { code, hostId: null, players: new Map(), phase: 'lobby', game: null, emptySince: null, tick: 0, sentTv: null };
       rooms.set(code, r);
-      const np = addPlayer(r, ws, cleanName(msg.name), null);
+      const np = addPlayer(r, ws, cleanName(msg.name));
       ws.roomCode = code; ws.playerId = np.id;
       send(ws, { t: 'joined', code, you: np.id, token: np.token });
       broadcastLobby(r);
@@ -259,25 +179,26 @@ function handle(ws, msg) {
     }
     case 'join': {
       if (room) return;
-      const code = String(msg.code || '').toUpperCase().trim();
+      const code = String(typeof msg.code === 'string' ? msg.code : '').toUpperCase().trim().slice(0, 8);
       const r = rooms.get(code);
-      if (!r) return send(ws, { t: 'err', msg: `Room ${code || '?'} not found` });
-      // reconnect by token
-      if (msg.token) {
+      if (!r) return send(ws, { t: 'err', code: 'noroom', msg: `Room ${code || '?'} not found` });
+      if (typeof msg.token === 'string' && msg.token) {
         for (const ep of r.players.values()) {
           if (ep.token === msg.token) {
-            if (ep.ws && ep.ws !== ws) try { ep.ws.close(); } catch (e) {}
+            if (ep.ws && ep.ws !== ws) { const old = ep.ws; ep.ws = null; old.playerId = null; old.roomCode = null; try { old.close(); } catch (e) {} }
             ep.ws = ws; ep.connected = true; if (msg.name) ep.name = cleanName(msg.name);
             ws.roomCode = code; ws.playerId = ep.id; r.emptySince = null;
+            ensureHost(r);
             send(ws, { t: 'joined', code, you: ep.id, token: ep.token, rejoined: true });
             broadcastLobby(r);
+            sendFullState(r, ep);
             return;
           }
         }
       }
       if (r.phase !== 'lobby') return send(ws, { t: 'err', msg: 'Game already in progress' });
       if (r.players.size >= S.MAX_PER_TEAM * 2) return send(ws, { t: 'err', msg: 'Room is full' });
-      const np = addPlayer(r, ws, cleanName(msg.name), null);
+      const np = addPlayer(r, ws, cleanName(msg.name));
       ws.roomCode = code; ws.playerId = np.id; r.emptySince = null;
       send(ws, { t: 'joined', code, you: np.id, token: np.token });
       broadcastLobby(r);
@@ -296,65 +217,53 @@ function handle(ws, msg) {
     case 'start': {
       if (room.phase !== 'lobby') return;
       if (p.id !== room.hostId) return send(ws, { t: 'err', msg: 'Only the host can start' });
-      if (!teamCount(room, 'L') || !teamCount(room, 'R')) return send(ws, { t: 'err', msg: 'Each team needs at least one player' });
-      const notReady = [...room.players.values()].filter((x) => !x.ready && x.id !== room.hostId);
+      const nl = teamCount(room, 'L'), nr = teamCount(room, 'R');
+      if (!nl || !nr) return send(ws, { t: 'err', msg: 'Each team needs at least one player' });
+      if (nl !== nr) return send(ws, { t: 'err', msg: `Teams must be even (${nl}v${nr}) — play 1v1 or 2v2` });
+      const notReady = [...room.players.values()].filter((x) => x.connected && !x.ready && x.id !== room.hostId);
       if (notReady.length) return send(ws, { t: 'err', msg: 'Waiting for: ' + notReady.map((x) => x.name).join(', ') });
+      if ([...room.players.values()].some((x) => !x.connected)) { resetToLobby(room); broadcastLobby(room); return send(ws, { t: 'err', msg: 'A disconnected player was removed; check the teams' }); }
       startGame(room); broadcastLobby(room); return;
     }
     case 'lobby':
       if (room.phase !== 'over' || p.id !== room.hostId) return;
-      room.phase = 'lobby'; room.game = null; for (const x of room.players.values()) x.ready = false;
+      resetToLobby(room);
       broadcastLobby(room); return;
     case 'cursor':
       if (msg.c === null || msg.c === undefined) p.cursor = null;
-      else if (Number.isFinite(msg.c) && Number.isFinite(msg.r) && (msg.b === 'L' || msg.b === 'R')) p.cursor = { b: msg.b, c: +(+msg.c).toFixed(2), r: +(+msg.r).toFixed(2) };
+      else if (Number.isFinite(msg.c) && Number.isFinite(msg.r) && (msg.b === 'L' || msg.b === 'R')) {
+        p.cursor = { b: msg.b, c: Math.max(0, Math.min(S.COLS, +msg.c.toFixed(2))), r: Math.max(0, Math.min(S.ROWS, +msg.r.toFixed(2))) };
+      }
       return;
     case 'chat': {
-      const text = String(msg.text || '').slice(0, 120).trim();
+      if (!take(ws.chatBucket, LIMITS.CHAT_RATE, LIMITS.CHAT_BURST)) return send(ws, { t: 'err', msg: 'Slow down on the chat' });
+      if (typeof msg.text !== 'string') return;
+      const text = msg.text.slice(0, 120).trim();
       if (text) broadcast(room, { t: 'chat', name: p.name, color: p.color, text });
       return;
     }
   }
   if (room.phase !== 'game') return;
-  const g = room.game, b = g.boards[p.team];
+  // test-only: corrupt the game state so the next tick throws (enabled only with FORGE_TEST_HOOKS=1)
+  if (msg.t === 'debug_crash' && process.env.FORGE_TEST_HOOKS === '1') { room.game.boards.L.towers.set('0,0', { c: 0, r: 0, type: 'bogus', lvl: 0, cd: 0, sellAt: null }); return; }
+  let err = null;
   switch (msg.t) {
-    case 'build': {
-      const spec = S.TOWERS[msg.type];
-      if (!spec) return;
-      const c = msg.c, r = msg.r;
-      const err = canBuild(b, c, r);
-      if (err) return send(ws, { t: 'err', msg: err });
-      if (p.gold < spec.cost) return send(ws, { t: 'err', msg: 'Not enough gold' });
-      p.gold -= spec.cost;
-      b.towers.set(key(c, r), { id: g.nextTowerId++, c, r, type: msg.type, lvl: 0, owner: p.id, cd: 0 });
-      recomputeDist(b);
-      return;
-    }
-    case 'upgrade': {
-      const t = b.towers.get(key(msg.c, msg.r));
-      if (!t) return;
-      if (t.owner !== p.id) return send(ws, { t: 'err', msg: "That's your teammate's tower" });
-      const cost = S.upgradeCost(t.type, t.lvl);
-      if (cost === null) return send(ws, { t: 'err', msg: 'Already max level' });
-      if (p.gold < cost) return send(ws, { t: 'err', msg: 'Not enough gold' });
-      p.gold -= cost; t.lvl++;
-      return;
-    }
-    case 'sell': {
-      const t = b.towers.get(key(msg.c, msg.r));
-      if (!t) return;
-      if (t.owner !== p.id) return send(ws, { t: 'err', msg: "That's your teammate's tower" });
-      p.gold += Math.floor(S.towerSpent(t.type, t.lvl) * S.SELL_REFUND);
-      b.towers.delete(key(t.c, t.r));
-      recomputeDist(b);
-      return;
-    }
-    case 'send': {
-      const err = doSend(room, p, msg.kind);
-      if (err) send(ws, { t: 'err', msg: err });
-      return;
-    }
+    case 'build':
+      if (!S.hasTower(msg.type)) return;
+      if (!isInt(msg.c) || !isInt(msg.r)) return;
+      err = G.build(room, p, msg.type, msg.c, msg.r); break;
+    case 'upgrade':
+      if (!isInt(msg.c) || !isInt(msg.r)) return;
+      err = G.upgrade(room, p, msg.c, msg.r); break;
+    case 'sell':
+      if (!isInt(msg.c) || !isInt(msg.r)) return;
+      err = G.sell(room, p, msg.c, msg.r); break;
+    case 'send':
+      if (!S.hasSend(msg.kind)) return send(ws, { t: 'err', msg: 'Unknown send' });
+      err = G.doSend(room, p, msg.kind); break;
+    default: return;
   }
+  if (err) send(ws, { t: 'err', msg: err });
 }
 
 function leave(ws) {
@@ -362,46 +271,87 @@ function leave(ws) {
   if (!room) return;
   const p = room.players.get(ws.playerId);
   if (!p || p.ws !== ws) return;
-  if (room.phase === 'lobby') {
-    room.players.delete(p.id);
-    if (room.hostId === p.id) room.hostId = room.players.size ? room.players.keys().next().value : null;
-  } else { p.connected = false; p.ws = null; p.cursor = null; }
+  if (room.phase === 'lobby') room.players.delete(p.id);
+  else { p.connected = false; p.ws = null; p.cursor = null; }
+  ensureHost(room);
   if (![...room.players.values()].some((x) => x.connected)) room.emptySince = Date.now();
   broadcastLobby(room);
 }
 
-wss.on('connection', (ws) => {
+// ---------------- rate limiting ----------------
+function bucket(burst) { return { tokens: burst, last: Date.now() }; }
+function take(b, rate, burst) {
+  const now = Date.now();
+  b.tokens = Math.min(burst, b.tokens + ((now - b.last) / 1000) * rate); b.last = now;
+  if (b.tokens < 1) return false;
+  b.tokens -= 1; return true;
+}
+
+function clientIp(req) {
+  const xf = req.headers['x-forwarded-for'];
+  return (typeof xf === 'string' && xf.split(',')[0].trim()) || req.socket.remoteAddress || '?';
+}
+
+wss.on('connection', (ws, req) => {
+  const ip = clientIp(req);
+  if (wss.clients.size > LIMITS.MAX_CONNECTIONS) { logOnce('maxconn', 'connection refused: server full'); ws.close(1013, 'Server full'); return; }
+  const n = (ipCounts.get(ip) || 0) + 1;
+  if (n > LIMITS.MAX_CONN_PER_IP) { logOnce('ipcap:' + ip, `connection refused: too many from ${ip}`); ws.close(1008, 'Too many connections'); return; }
+  ipCounts.set(ip, n); ws.ip = ip;
   ws.isAlive = true;
+  ws.msgBucket = bucket(LIMITS.MSG_BURST); ws.chatBucket = bucket(LIMITS.CHAT_BURST); ws.dropped = 0;
+  ws.joinTimer = setTimeout(() => { if (!ws.roomCode) ws.close(1000, 'Join timeout'); }, LIMITS.JOIN_TIMEOUT_MS);
   ws.on('pong', () => (ws.isAlive = true));
-  ws.on('message', (data) => {
+  ws.on('message', (data, isBinary) => {
+    if (!take(ws.msgBucket, LIMITS.MSG_RATE, LIMITS.MSG_BURST)) {
+      if (++ws.dropped > LIMITS.DROP_LIMIT) { logOnce('flood:' + ip, `disconnecting ${ip}: message flood`); ws.terminate(); }
+      return;
+    }
+    if (isBinary) return;
     let msg;
     try { msg = JSON.parse(data); } catch (e) { return; }
-    if (!msg || typeof msg !== 'object') return;
-    try { handle(ws, msg); } catch (e) { log('ERROR handling message: ' + (e.stack || e)); }
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
+    try { handle(ws, msg); } catch (e) { logOnce('handle:' + (e && e.message), 'ERROR handling message: ' + (e.stack || e)); }
   });
-  ws.on('close', () => { try { leave(ws); } catch (e) { log('ERROR on close: ' + (e.stack || e)); } });
+  ws.on('close', () => {
+    clearTimeout(ws.joinTimer);
+    const c = (ipCounts.get(ip) || 1) - 1; if (c > 0) ipCounts.set(ip, c); else ipCounts.delete(ip);
+    try { leave(ws); } catch (e) { logOnce('close', 'ERROR on close: ' + (e.stack || e)); }
+  });
   ws.on('error', () => {});
 });
 
 // main loop
+function crashRoom(room, e) {
+  logOnce('tick:' + room.code, `ERROR in tick for room ${room.code}, resetting it to the lobby: ` + (e && e.stack || e));
+  try {
+    broadcast(room, { t: 'err', msg: 'The game hit a server error and was reset to the lobby. Sorry!' });
+    resetToLobby(room); broadcastLobby(room);
+  } catch (e2) { log('ERROR resetting room ' + room.code + ', removing it: ' + (e2.stack || e2)); rooms.delete(room.code); }
+}
 setInterval(() => {
   for (const room of rooms.values()) {
     try {
-      if (room.phase === 'game') { for (let i = 0; i < SPEED && room.phase === 'game'; i++) stepGame(room); broadcast(room, stateMsg(room)); room.game.events = []; }
-      else if (room.phase === 'over' && room.game && room.game.time !== room._lastOverSent) { broadcast(room, stateMsg(room)); room._lastOverSent = room.game.time; room.game.events = []; }
-    } catch (e) { log('ERROR in tick for room ' + room.code + ': ' + (e.stack || e)); }
+      if (room.phase === 'game') {
+        let ended = false;
+        for (let i = 0; i < SPEED && !ended; i++) ended = G.stepGame(room);
+        room.tick++;
+        broadcastState(room, ended);
+        room.game.events = [];
+        if (ended) { log(`room ${room.code} game over, winner ${room.game.winner} after ${room.game.time.toFixed(0)}s`); broadcastLobby(room); }
+      }
+    } catch (e) { crashRoom(room, e); }
   }
-}, TICK);
+}, G.TICK);
 
 // housekeeping: heartbeat + empty room cleanup
 setInterval(() => {
-  for (const ws of wss.clients) { if (!ws.isAlive) { ws.terminate(); continue; } ws.isAlive = false; try { ws.ping(); } catch (e) {} }
+  for (const ws of wss.clients) { if (!ws.isAlive) { ws.terminate(); continue; } ws.isAlive = false; ws.dropped = 0; try { ws.ping(); } catch (e) {} }
   const now = Date.now();
   for (const [code, room] of rooms) {
     if (!room.players.size || (room.emptySince && now - room.emptySince > 5 * 60 * 1000)) { rooms.delete(code); log(`room ${code} removed`); }
   }
 }, 15000);
 
-function log(s) { console.log(new Date().toISOString() + ' ' + s); }
-process.on('uncaughtException', (e) => log('UNCAUGHT ' + (e.stack || e)));
-server.listen(PORT, () => log(`Forge TD listening on http://localhost:${PORT}`));
+process.on('uncaughtException', (e) => logOnce('uncaught:' + (e && e.message), 'UNCAUGHT ' + (e.stack || e)));
+server.listen(PORT, () => log(`Forge TD v${S.VERSION} listening on http://localhost:${PORT}${SPEED > 1 ? ` (SPEED=${SPEED}, testing only)` : ''}`));

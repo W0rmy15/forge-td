@@ -44,3 +44,5 @@ canvas{background:#0b0e13;border-radius:10px;cursor:crosshair}
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#c0392b;color:#fff;padding:8px 16px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.show{opacity:1}
 #toast.info{background:#2d6cdf}
+.btns button.flash{outline:2px solid #7bed9f;filter:brightness(1.5)}
+button.danger{background:#c0392b}

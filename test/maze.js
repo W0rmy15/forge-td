@@ -4,7 +4,7 @@ const URL_ = (process.argv[2] || 'ws://localhost:8080').replace(/^http/, 'ws');
 const sl = (ms) => new Promise((r) => setTimeout(r, ms));
 const a = new WebSocket(URL_), b = new WebSocket(URL_);
 let code, st, errs = [];
-a.on('message', (d) => { const m = JSON.parse(d); if (m.t === 'joined') code = m.code; if (m.t === 's') st = m; if (m.t === 'err') errs.push(m.msg); });
+a.on('message', (d) => { const m = JSON.parse(d); if (m.t === 'joined') code = m.code; if (m.t === 's') { for (const b of ['L', 'R']) if (!m.boards[b].towers) m.boards[b].towers = st ? st.boards[b].towers : []; st = m; } if (m.t === 'err') errs.push(m.msg); });
 (async () => {
   await sl(400);
   a.send(JSON.stringify({ t: 'create', name: 'A' })); await sl(300);
