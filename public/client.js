@@ -228,7 +228,14 @@
     audTowerDiff(s, prevState);
     // effects from events
     for (const e of (s.ev || [])) {
-      if (e.k === 'shot') aud('shot_' + e.tt, { board: e.b, x: e.x1 });
+      if (e.k === 'shot') {
+        aud('shot_' + e.tt, { board: e.b, x: e.x1 });
+        const k = twKey(e.b, Math.floor(e.x1), Math.floor(e.y1));
+        let a = TWR.get(k); if (!a) { a = { ang: 0, kick: 0 }; TWR.set(k, a); }
+        a.ang = Math.atan2(e.y2 - e.y1, e.x2 - e.x1) + Math.PI / 2; a.kick = performance.now();
+        const mz = spawnP('muzzle', bx(e.b, e.x1) + Math.sin(a.ang) * 16, by(e.y1) - Math.cos(a.ang) * 16, e.tt === 'cannon' ? 120 : 90);
+        if (mz) { mz.rot = a.ang; mz.txt = e.tt; }
+      }
       else if (e.k === 'kill') aud('kill', { kind: e.kind, board: e.b, x: e.x });
       else if (e.k === 'leak') aud(e.team === m.team ? 'life_loss' : 'leak', { board: e.team });
       else if (e.k === 'send') aud('send', { kind: e.kind, tier: e.tier, board: e.team === 'L' ? 'R' : 'L' });
@@ -519,12 +526,8 @@
   function fxEvent(e) {
     const now = performance.now();
     if (e.k === 'shot') {
-      const k = twKey(e.b, Math.floor(e.x1), Math.floor(e.y1));
-      let a = TWR.get(k); if (!a) { a = { ang: 0, kick: 0 }; TWR.set(k, a); }
-      a.ang = Math.atan2(e.y2 - e.y1, e.x2 - e.x1) + Math.PI / 2; a.kick = now;
       const p = spawnP('proj', bx(e.b, e.x1), by(e.y1), e.tt === 'cannon' ? 230 : e.tt === 'frost' ? 170 : 110);
       if (p) { p.x2 = bx(e.b, e.x2); p.y2 = by(e.y2); p.txt = e.tt; p.rot = Math.atan2(p.y2 - p.y, p.x2 - p.x); }
-      if (e.tt === 'cannon') { const m = spawnP('muzzle', bx(e.b, e.x1) + Math.sin(a.ang) * 16, by(e.y1) - Math.cos(a.ang) * 16, 110); if (m) m.rot = a.ang; }
     } else if (e.k === 'boom') {
       const x = bx(e.b, e.x), y = by(e.y), r = e.r * CELL;
       const ring = spawnP('ring', x, y, 260); if (ring) { ring.s = r; ring.col = '255,190,60'; }
@@ -580,7 +583,9 @@
       } else if (p.t === 'flake') {
         ctx.globalAlpha = 1 - k; ctx.fillStyle = '#ffffff'; AR.star(ctx, p.x + p.vx * age, p.y + p.vy * age, p.s, 6, 0.4); ctx.fill(); ctx.globalAlpha = 1;
       } else if (p.t === 'muzzle') {
-        ctx.globalAlpha = 1 - k; AR.star(ctx, p.x, p.y, 7 * (1 - k * 0.5), 7, 0.45); ctx.fillStyle = '#ffe14a'; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#ff8a1f'; ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.globalAlpha = 1 - k; AR.star(ctx, p.x, p.y, 7 * (1 - k * 0.5), 7, 0.45);
+        ctx.fillStyle = p.txt === 'frost' ? '#c8f0ff' : '#ffe14a'; ctx.fill();
+        ctx.lineWidth = 1.5; ctx.strokeStyle = p.txt === 'frost' ? '#7fe0ff' : '#ff8a1f'; ctx.stroke(); ctx.globalAlpha = 1;
       } else if (p.t === 'text') {
         const y = p.y - 26 * k, sc = k < 0.15 ? 0.6 + k * 2.7 : 1;
         ctx.globalAlpha = k > 0.7 ? (1 - k) / 0.3 : 1; ctx.font = `700 ${Math.round(p.s * sc)}px ${FONT}`; ctx.textAlign = 'center';
@@ -685,6 +690,10 @@
           a.upLvl = t[4]; a.upAt = now;
           const tx = x0 + (t[1] + 0.5) * CELL, ty = TOP + (t[2] + 0.5) * CELL;
           const pop = spawnP('pop', tx, ty, 260); if (pop) { pop.s = 11; pop.col = '#ffd23a'; }
+        }
+        if (now - a.kick > 400) {
+          let d = -a.ang; if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2;
+          a.ang += d * 0.08;
         }
         drawTowerSprite(x0 + (t[1] + 0.5) * CELL, TOP + (t[2] + 0.5) * CELL, t[3], t[4], a.ang, a.kick, t[6] ? 0.55 : 1, now, a.born, a.upAt);
         if (t[6]) { const c = AR.coin(), bob = Math.sin(now / 200 + t[0]) * 1.5; ctx.drawImage(c.c, x0 + (t[1] + 1) * CELL - 12, TOP + t[2] * CELL - 3 + bob, c.w, c.h); } // sale queued
