@@ -48,7 +48,7 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
   check('send ramp: wave 1 = 0.26x, wave 14+ = 1x', Math.abs(S.sendRamp(1) - 0.26) < 1e-9 && S.sendRamp(13) < 1 && S.sendRamp(14) === 1 && S.sendRamp(20) === 1);
   check('bounties Runner 9 / Swarm 3 / Brute 24', S.SENDS.runner.bounty === 9 && S.SENDS.swarm.bounty === 3 && S.SENDS.brute.bounty === 24);
   check('2v2 team scale eases 2.0 (wave 1) -> 2.3 (wave 14+), 1v1 = 1', S.teamScale(1, 12) === 1 && Math.abs(S.teamScale(2, 1) - 2.0) < 1e-9 && Math.abs(S.teamScale(2, 14) - 2.3) < 1e-9 && Math.abs(S.teamScale(2, 30) - 2.3) < 1e-9);
-  check('2v2 send multiplier: x1.8 to wave 6, x2.99 (2.3 x 1.3) from wave 16, 1v1 = 1', S.sendTeamMult(1, 20) === 1 && S.sendTeamMult(2, 1) === 1.8 && S.sendTeamMult(2, 6) === 1.8 && Math.abs(S.sendTeamMult(2, 16) - 2.99) < 1e-9 && Math.abs(S.sendTeamMult(2, 30) - 2.99) < 1e-9);
+  check(`2v2 send multiplier: x${S.SEND_TEAM2.START} to wave 6, x2.99 (2.3 x 1.3) from wave 16, 1v1 = 1`, S.sendTeamMult(1, 20) === 1 && S.sendTeamMult(2, 1) === S.SEND_TEAM2.START && S.sendTeamMult(2, 6) === S.SEND_TEAM2.START && Math.abs(S.sendTeamMult(2, 16) - 2.99) < 1e-9 && Math.abs(S.sendTeamMult(2, 30) - 2.99) < 1e-9);
   check('send HP multipliers 2.1 / 0.9 / 10.5 (QA T10)', S.SENDS.runner.hpMult === 2.1 && S.SENDS.swarm.hpMult === 0.9 && S.SENDS.brute.hpMult === 10.5);
 }
 // --- unlimited sends + send lane ---
@@ -92,9 +92,45 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
   step(room, S.SELL_MAX_WAIT - 1);
   check('queued sale still waiting before the max wait', b.towers.has('10,18'));
   step(room, 1.5);
-  check('queued sale executes after SELL_MAX_WAIT s when no creep is within 3 cells (board still busy)', !b.towers.has('10,18') && b.creeps.length > 0);
-  G.build(room, p, 'arrow', 6, 2); G.sell(room, p, 6, 2); step(room, S.SELL_MAX_WAIT + 2);
-  check('queued sale next to a creep keeps waiting after the max wait', b.towers.has('6,2'));
+  check('queued sale executes after SELL_MAX_WAIT s when it reroutes nobody (board still busy)', !b.towers.has('10,18') && b.creeps.length > 0);
+  // v0.5: a tower right next to a creep that is not on any route still sells after the max wait
+  G.build(room, p, 'arrow', 6, 2); G.sell(room, p, 6, 2); step(room, S.SELL_MAX_WAIT + 0.5);
+  check('v0.5: queued sale next to a creep sells after the max wait when no route changes', !b.towers.has('6,2'));
+}
+// --- v0.5: sale fallback vs routes (trickle grief) ---
+{
+  // a wall across row 10 with the gap at column 0; the creep stuck at (2,4) routes through the gap
+  const room = mkRoom(), g = room.game, p = room.players.get(1), b = g.boards.L; p.gold = 1e6; g.nextWave = 1e9;
+  for (let c = 1; c <= 10; c++) G.build(room, p, 'arrow', c, 10);
+  b.queue.push({ at: 1e9, kind: 'neutral', hp: 1, speed: 1, bounty: 1, leak: 1, radius: 0.3 });
+  b.creeps.push({ id: 998, kind: 'neutral', hp: 1e9, maxHp: 1e9, speed: 0, bounty: 0, leak: 1, radius: 0.3, v: 1, arrowMult: 1, slowResist: 0, c: 2, r: 4, nc: null, nr: null, x: 2.5, y: 4.5, slowUntil: 0, slowAmt: 0, from: null });
+  check('removing the wall tower at (5,10) changes the creep route', G.saleChangesRoute(b, b.towers.get('5,10')) === true);
+  check('removing the far wall end (10,10) (a longer detour) changes no route', G.saleChangesRoute(b, b.towers.get('10,10')) === false);
+  G.sell(room, p, 5, 10); const t0 = g.time;
+  step(room, S.SELL_MAX_WAIT + 1);
+  check('route-changing sale is still queued after SELL_MAX_WAIT', b.towers.has('5,10'));
+  let soldAt = null; for (let i = 0; i < 20 * 15 && soldAt === null; i++) { G.stepGame(room); g.events.length = 0; if (!b.towers.has('5,10')) soldAt = g.time - t0; }
+  check(`route-changing sale executes at the SELL_HARD_CAP (${S.SELL_HARD_CAP} s)`, soldAt !== null && Math.abs(soldAt - S.SELL_HARD_CAP) < 0.11, { soldAt });
+}
+// --- v0.5: QA trickle scenario (one runner per second forever: the board is never clear) ---
+{
+  const trickle = (tc, tr) => {
+    const room = mkRoom(), g = room.game, d = room.players.get(1), a = room.players.get(2);
+    d.gold = 1e5; a.gold = 1e6; g.boards.L.lives = 1e9; g.nextWave = 1e9;
+    G.build(room, d, 'arrow', tc, tr);
+    let queuedAt = null, soldAt = null;
+    for (let i = 0; i < 20 * 120; i++) {
+      if (i % 20 === 0) G.doSend(room, a, 'runner');
+      if (i === 100) { G.sell(room, d, tc, tr); queuedAt = g.time; }
+      for (const c of g.boards.L.creeps) c.hp = Math.max(c.hp, 1e6);
+      G.stepGame(room); g.events.length = 0;
+      if (queuedAt !== null && soldAt === null && !g.boards.L.towers.has(tc + ',' + tr)) soldAt = g.time - queuedAt;
+    }
+    return soldAt;
+  };
+  const near = trickle(4, 3), far = trickle(0, 18);
+  check('trickle: tower beside the path sells within the hard cap', near !== null && near <= S.SELL_HARD_CAP + 0.1, { near });
+  check('trickle: far tower sells after the max wait', far !== null && far <= S.SELL_MAX_WAIT + 0.1, { far });
 }
 // --- v0.4: send upgrades ---
 {
@@ -104,8 +140,8 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
   g.wave = 8; const poor = room.players.get(2); poor.gold = 10;
   check('upgrade: not enough gold', G.upgradeSend(room, poor, 'runner') === 'Not enough gold' && poor.gold === 10);
   const g0 = p.gold, inc0 = p.income;
-  check('upgrade: tier 1 bought at wave 8 for 2x base cost', G.upgradeSend(room, p, 'runner') === null && G.tierOf(p, 'runner') === 1 && g0 - p.gold === S.sendUpCost('runner', 0) && S.sendUpCost('runner', 0) === 70);
-  check('upgrade: gives a little income', p.income >= inc0 + 3, { inc0, inc: p.income });
+  check(`upgrade: tier 1 bought at wave 8 for ${S.SEND_UP.UP_COST[1]}x base cost`, G.upgradeSend(room, p, 'runner') === null && G.tierOf(p, 'runner') === 1 && g0 - p.gold === S.sendUpCost('runner', 0) && S.sendUpCost('runner', 0) === Math.round(35 * S.SEND_UP.UP_COST[1]));
+  check('upgrade: gives a little income (cost x INCOME_PER_GOLD, carried fraction)', p.income + p.incomeFrac - inc0 > 0 && Math.abs(p.income + p.incomeFrac - inc0 - S.sendUpCost('runner', 0) * S.SEND_UP.INCOME_PER_GOLD) < 1e-9, { inc0, inc: p.income, frac: p.incomeFrac });
   check('upgrade: tier 2 locked until wave 12', /unlocks at wave 12/.test(G.upgradeSend(room, p, 'runner') || ''));
   g.wave = 16; G.upgradeSend(room, p, 'runner'); G.upgradeSend(room, p, 'runner');
   check('upgrade: max tier 3', G.tierOf(p, 'runner') === 3 && /max tier/.test(G.upgradeSend(room, p, 'runner') || ''));
@@ -116,7 +152,7 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
   check('T3 runner: HP x1.85, speed x1.35, price x1.3', Math.abs(q.hp - Math.round(S.sendHp('runner', 16, 1, 0) * 1.85)) <= 2 && Math.abs(q.speed - S.SENDS.runner.speed * 1.35) < 1e-9 && S.sendSpec('runner', 3).cost === Math.round(35 * 1.3), { hp: q.hp, base: S.sendHp('runner', 16, 1, 0), speed: q.speed });
   g.wave = 16; for (let i = 0; i < 3; i++) G.upgradeSend(room, p, 'swarm');
   const before = g.boards.R.queue.length; G.doSend(room, p, 'swarm');
-  check('T3 swarm sends 7 creeps', g.boards.R.queue.length - before === 7);
+  check(`T3 swarm sends ${S.SEND_TRAITS.swarm.count[3]} creeps`, g.boards.R.queue.length - before === S.SEND_TRAITS.swarm.count[3]);
   for (let i = 0; i < 3; i++) G.upgradeSend(room, p, 'brute');
   G.doSend(room, p, 'brute'); const bq = g.boards.R.queue.filter((x) => x.kind === 'brute').pop();
   check('T3 brute carries armor (arrow x0.5) and slow resist 50%', bq.arrowMult === 0.5 && bq.slowResist === 0.5);

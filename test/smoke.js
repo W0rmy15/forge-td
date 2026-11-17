@@ -2,6 +2,7 @@
 //   npm i --no-save puppeteer-core   (or set PUPPETEER_PATH to an existing install), CHROME=/path/to/chrome
 // Usage: node test/smoke.js http://localhost:PORT   (fresh server; run it before other tests so the per-IP cap isn't hit)
 const puppeteer = require(process.env.PUPPETEER_PATH || 'puppeteer-core');
+const S = require('../public/shared.js');
 const URL_ = process.argv[2] || 'http://localhost:8721';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let fails = 0; const check = (n, ok, info) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${info !== undefined ? '  ' + JSON.stringify(info) : ''}`); if (!ok) fails++; };
@@ -101,7 +102,7 @@ let fails = 0; const check = (n, ok, info) => { console.log(`${ok ? 'PASS' : 'FA
     if (g1 - g0 < 4000) console.log('SKIP  send-tier purchase flow (server not started with FORGE_TEST_HOOKS=1)');
     else {
       const u = await A.$eval('#sendBtns', (e) => e.textContent);
-      check('upgrade button unlocked at wave 8 with its price', /⬆ T1 · 70g/.test(u), u.replace(/\s+/g, ' ').slice(0, 160));
+      check('upgrade button unlocked at wave 8 with its price', new RegExp('⬆ T1 · ' + S.sendUpCost('runner', 0) + 'g').test(u), u.replace(/\s+/g, ' ').slice(0, 160));
       await A.keyboard.down('Shift'); await A.keyboard.press('Q'); await A.keyboard.up('Shift'); await sleep(600);
       const tier = await A.evaluate(() => window.__ftdState().players.find((p) => p.name === 'Alice').tiers.runner);
       const t2 = await A.evaluate(() => [document.getElementById('toast').textContent, ...window.__ftdToasts().queued].join(' | '));

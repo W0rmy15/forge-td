@@ -1,5 +1,6 @@
 // Small headless client helpers for tests (merges delta tower updates like the browser client does).
 const WebSocket = require('ws');
+const S = require('../public/shared.js');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function client(url, name) {
   return new Promise((res, rej) => {
@@ -11,7 +12,7 @@ function client(url, name) {
     ws.on('close', (code) => { c.closed = true; c.closeCode = code; });
     ws.on('message', (d) => {
       c.msgs++; c.bytes += d.length;
-      const m = JSON.parse(d);
+      const m = S.decodeState(JSON.parse(d));
       if (m.t === 'joined') { c.id = m.you; c.code = m.code; c.token = m.token; c.rejoined = m.rejoined; }
       else if (m.t === 'lobby') c.lobby = m;
       else if (m.t === 's') { for (const b of ['L', 'R']) if (!m.boards[b].towers) m.boards[b].towers = c.state ? c.state.boards[b].towers : []; c.state = m; }

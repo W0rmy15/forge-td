@@ -76,12 +76,14 @@
       history.replaceState(null, '', '?room=' + code);
     } else if (m.t === 'lobby') { lobby = m; renderLobby(); }
     else if (m.t === 's') {
+      S.decodeState(m); // v0.5 compact creeps + shot array -> the usual shapes
       // static tower lists are only sent when they change: reuse the last ones we have
       for (const b of ['L', 'R']) if (!m.boards[b].towers) m.boards[b].towers = state && state.boards[b].towers ? state.boards[b].towers : [];
       prevState = state; state = m; stateAt = performance.now(); buildPrev(); trackHits(m); onState(m);
     }
     else if (m.t === 'err') {
-      toast(m.msg);
+      if (/^Lane full/.test(m.msg || '')) toast(m.msg, false, 'lanefull', true); // jumps ahead of 'Sent' toasts, never stacks
+      else toast(m.msg, false, null, true);
       if (m.code === 'replaced') replaced();
       else if (m.code === 'noroom' || m.code === 'joinfail' || (!code && rejoinCode)) {
         // any join failure (room gone, game in progress, room full): stop retrying and go back to the menu
@@ -145,7 +147,7 @@
   const rampFull = S.sendRampFullWave();
   function sendTitle(k, tier) {
     const t = S.SENDS[k], sp = S.sendSpec(k, tier);
-    return `${t.desc}: ${sp.count}× ${Math.round(t.hpMult * S.SEND_UP.HP[tier] * 100)}% of a wave creep's HP (more in 2v2; weaker early, full strength from wave ${rampFull}). ` +
+    return `${t.desc}: ${sp.count}× ${Math.round(t.hpMult * S.tierHp(k, tier) * 100)}% of a wave creep's HP (more in 2v2; weaker early, full strength from wave ${rampFull}). ` +
       `Kill bounty ${sp.bounty}g for the defender. Income gain shrinks as your send income grows.` + (tier ? ` Tier ${tier}: ${S.SEND_TRAITS[k].desc[tier]}.` : '');
   }
   for (const [k, t] of Object.entries(S.SENDS)) {
@@ -168,7 +170,7 @@
       sendBtns[k].disabled = m.gold < sp.cost;
       const uh = up === null ? '★ MAX' : wave < unlock ? `🔒 T${tier + 1} @ wave ${unlock}` : `⬆ T${tier + 1} · ${up}g`;
       if (upBtns[k].dataset.html !== uh) { upBtns[k].innerHTML = uh; upBtns[k].dataset.html = uh; }
-      upBtns[k].title = up === null ? `${t.name} is max tier` : `[Shift+${t.key.toUpperCase()}] Upgrade ${t.name} to tier ${tier + 1}: ${S.SEND_TRAITS[k].desc[tier + 1]}, HP ×${S.SEND_UP.HP[tier + 1]} (price ×${S.SEND_UP.COST[tier + 1]}). Lasts the whole match. Unlocks at wave ${unlock}.`;
+      upBtns[k].title = up === null ? `${t.name} is max tier` : `[Shift+${t.key.toUpperCase()}] Upgrade ${t.name} to tier ${tier + 1}: ${S.SEND_TRAITS[k].desc[tier + 1]}, HP ×${S.tierHp(k, tier + 1)} (price ×${S.SEND_UP.COST[tier + 1]}). Lasts the whole match. Unlocks at wave ${unlock}.`;
       upBtns[k].disabled = up === null || wave < unlock || m.gold < up;
       upBtns[k].classList.toggle('max', up === null);
     }
@@ -359,15 +361,18 @@
   // toast queue: messages are shown one after another instead of overwriting each other.
   // A toast with a key replaces a queued (or showing) toast with the same key, so bursts (e.g. enemy sends) coalesce.
   const toastQ = []; let toastCur = null, toastTimer = null;
-  function toast(msg, info, key) {
-    const item = { msg, info: !!info, key: key || null };
+  // urgent (errors): queued ahead of info toasts, and an info toast that is showing is cut short for it
+  function toast(msg, info, key, urgent) {
+    const item = { msg, info: !!info, key: key || null, urgent: !!urgent };
     if (key) {
       if (toastCur && toastCur.key === key) { toastCur.msg = msg; paintToast(); return; }
       const i = toastQ.findIndex((x) => x.key === key); if (i >= 0) { toastQ[i] = item; return; }
     }
     if (toastQ.length >= 4) { const i = toastQ.findIndex((x) => x.info); toastQ.splice(i >= 0 ? i : 0, 1); } // keep it short
-    toastQ.push(item);
+    if (urgent) { const i = toastQ.findIndex((x) => !x.urgent); toastQ.splice(i >= 0 ? i : toastQ.length, 0, item); }
+    else toastQ.push(item);
     if (!toastCur) nextToast();
+    else if (urgent && toastCur.info) { clearTimeout(toastTimer); toastTimer = setTimeout(nextToast, Math.max(0, 350 - (performance.now() - toastCur.at))); }
   }
   function toastHas(key) { return (toastCur && toastCur.key === key) || toastQ.some((x) => x.key === key); }
   function paintToast() { const t = $('toast'); t.textContent = toastCur.msg; t.className = 'show' + (toastCur.info ? ' info' : ''); }
@@ -375,6 +380,7 @@
     clearTimeout(toastTimer);
     toastCur = toastQ.shift() || null;
     if (!toastCur) { $('toast').className = ''; return; }
+    toastCur.at = performance.now();
     paintToast();
     toastTimer = setTimeout(nextToast, toastQ.length ? 1100 : 1800);
   }
@@ -441,13 +447,14 @@
   // ---- particle / effect pool ----
   const POOL = 900, P = [];
   for (let i = 0; i < POOL; i++) P.push({ on: false, t: 0, x: 0, y: 0, vx: 0, vy: 0, x2: 0, y2: 0, t0: 0, dur: 0, s: 0, col: '', rot: 0, vr: 0, txt: '', a: 0 });
-  let pNext = 0;
+  // free list of pool indexes: O(1) spawn, and a full pool costs nothing (no 900-slot scan)
+  const PFREE = new Int32Array(POOL); let pFreeN = POOL;
+  for (let i = 0; i < POOL; i++) { PFREE[i] = POOL - 1 - i; P[i].i = i; }
+  function freeP(p) { p.on = false; PFREE[pFreeN++] = p.i; }
   function spawnP(t, x, y, dur) {
-    for (let k = 0; k < POOL; k++) {
-      const p = P[pNext]; pNext = (pNext + 1) % POOL;
-      if (!p.on) { p.on = true; p.t = t; p.x = x; p.y = y; p.t0 = performance.now(); p.dur = dur; p.vx = 0; p.vy = 0; p.rot = 0; p.vr = 0; p.s = 1; p.a = 0; p.soft = 0; return p; }
-    }
-    return null; // pool full: drop the effect
+    if (!pFreeN) return null; // pool full: drop the effect
+    const p = P[PFREE[--pFreeN]];
+    p.on = true; p.t = t; p.x = x; p.y = y; p.t0 = performance.now(); p.dur = dur; p.vx = 0; p.vy = 0; p.rot = 0; p.vr = 0; p.s = 1; p.a = 0; p.soft = 0; return p;
   }
   const CHILL = new Map();
   const TWR = new Map(); // tower anim state by numeric key: { id, ang, kick, born, upLvl, upAt }
@@ -488,7 +495,7 @@
     for (let i = 0; i < POOL; i++) {
       const p = P[i]; if (!p.on) continue;
       const age = now - p.t0, k = age / p.dur;
-      if (k >= 1) { p.on = false; continue; }
+      if (k >= 1) { freeP(p); continue; }
       if (p.t === 'proj') {
         const x = p.x + (p.x2 - p.x) * k, y = p.y + (p.y2 - p.y) * k;
         if (p.txt === 'cannon') {

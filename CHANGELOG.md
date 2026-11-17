@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.5.0 — 2026-11-16
+
+Core fixes from the v0.4 QA review: trickle-proof tower sales, upgrade economy, a leaner wire format, and small server fixes.
+
+### Gameplay
+- **Queued sales can't be locked by trickle sends.** The old fallback (sell after 10 s once no creep is within 3 cells)
+  almost never fired for maze towers. Now a queued sale on a busy board executes:
+  - as soon as the board is clear (unchanged);
+  - after `SELL_MAX_WAIT` (10 s) if removing the tower changes no creep's route (every creep's route and the spawn route
+    are walked cell by cell with and without the tower);
+  - after `SELL_HARD_CAP` (20 s) no matter what.
+  QA's trickle case (one runner per second forever) now sells a tower beside the path after 10 s (was > 115 s).
+  Sell/rebuild juggling on a two-gap wall drops from 2–4 flips per wave to 1–2, and gains nothing measurable
+  (wave 10: leaks 6 → 5 with juggling, was 6 → 3). Regression tests: `test/sim.js`, `test/juggle.js`.
+- **Balance (QA's V7, with T1 at 1.75):** send-tier income `INCOME_PER_GOLD` 0.05 → 0.03; tier prices `UP_COST`
+  [2, 3.5, 5.5] → [1.75, 3, 5] (QA proposed 1.5 for T1, but that let 1v1 heavy upgraders win at 5.8 min in the matrix);
+  Swarm T3 is 6 per send (was 7); 2v2 early send multiplier `SEND_TEAM2.START` 1.8 → 1.5; Brute leaks cost 1 life (was 2).
+  - A bot that never sends and puts 20% into tiers no longer beats pure defense (1v1 0/5, five draws; 2v2 0/5, was 5/5 in both).
+  - No sender win under 8 min anywhere in `test/matrix.js` (5 seeds; v0.4 had 3, the 2v2 Brute bank-and-dump).
+  - 40% senders still beat pure defense at 12.3–13.8 min. Balanced games run 13.3–14.8 min.
+  - Swarm T3 HP 1.85 → 1.6 (QA's next lever) was tested and **not adopted**: 2v2 "U swarm60" still wins 5/5 even at
+    1.2, so those wins come from send volume, not T3 HP. `SEND_TRAITS[kind].hp` now allows per-kind tier HP if needed.
+
+### Network and server
+- **Compact state messages** (decoded by `SHARED.decodeState`, so the client and tests see the old shapes):
+  - creeps: `[id, kindIndex, x*10, y*10, hp, maxHp, slowed, v]` (positions to 0.1 cell; radius comes from the kind);
+  - shots move out of `ev` into a flat `sh` array of 5 numbers per shot.
+  At about 113 creeps a message goes from 6.65 KB to 4.58 KB (−31%), and from 11.8 to 8.0 KB at about 230 creeps.
+- Each board in the state carries `lane` (seconds its send lane is booked ahead) and `laneFull` (1 while sends to it are
+  refused), so the client can show a lane-full state on the send buttons.
+- `TRUST_CF=1` trusts only `CF-Connecting-IP`; `True-Client-IP` is ignored (Cloudflare only sets it on Enterprise plans).
+- Static files: `.ttf` is served as `font/ttf` (plus `font/otf`, `font/woff`, `font/woff2`, `.txt`, `.json`, `.jpg`, `.webp`).
+
+### Client (logic only; visuals are Forge Art's)
+- The particle pool uses a free list: spawning is O(1), and a full pool no longer scans 900 slots per effect.
+- Error toasts (e.g. "Lane full") jump ahead of queued info toasts such as "Sent …" and cut a showing info toast short.
+  "Lane full" collapses into a single toast.
+
+### Tests and tools
+- New: `test/juggle.js`, `test/wirebytes.js` (bytes per message before/after plus a decode round trip), `test/tune.js`
+  (QA's tune4 sweep). `test/balance.js` gains QA's eco/free/upE bots and an `onTick` hook. Tests read tuning values
+  from `shared.js` instead of hard-coding them.
+
 ## 0.4.0 — 2026-11-16
 
 New cartoon look, upgradable sends, and the v0.3 QA findings (proxy headers, lane limit, sale wait, T10 balance base).

@@ -84,8 +84,8 @@ function queueWave(room) {
   for (const t of ['L', 'R']) {
     const b = g.boards[t];
     const count = Math.min(W.COUNT_BASE + n, W.COUNT_MAX);
-    for (let i = 0; i < count; i++) b.queue.push({ at: g.time + i * W.SPACING, kind: 'neutral', v: n, hp, speed: n % W.FAST_EVERY === 0 ? W.FAST_SPEED : W.SPEED, bounty: 1 + Math.floor(n / 3), leak: leakMult, radius: 0.24 });
-    if (boss) b.queue.push({ at: g.time + count * W.SPACING + 0.5, kind: 'boss', v: n, hp: Math.round(hp * W.BOSS_HP_MULT), speed: W.BOSS_SPEED, bounty: 10 + n * 2, leak: W.BOSS_LEAK * leakMult, radius: 0.42 });
+    for (let i = 0; i < count; i++) b.queue.push({ at: g.time + i * W.SPACING, kind: 'neutral', v: n, hp, speed: n % W.FAST_EVERY === 0 ? W.FAST_SPEED : W.SPEED, bounty: 1 + Math.floor(n / 3), leak: leakMult, radius: S.CREEP_RADIUS.neutral });
+    if (boss) b.queue.push({ at: g.time + count * W.SPACING + 0.5, kind: 'boss', v: n, hp: Math.round(hp * W.BOSS_HP_MULT), speed: W.BOSS_SPEED, bounty: 10 + n * 2, leak: W.BOSS_LEAK * leakMult, radius: S.CREEP_RADIUS.boss });
   }
   g.events.push({ k: 'wave', n, boss });
 }
@@ -185,9 +185,28 @@ function boardBusy(g, b) {
   return b.creeps.length > 0 || b.queue.some((q) => q.at <= g.time + S.SELL_SPAWN_GUARD);
 }
 
-function creepNear(b, t, rad) {
-  const tx = t.c + 0.5, ty = t.r + 0.5;
-  for (const cr of b.creeps) if (Math.hypot(cr.x - tx, cr.y - ty) <= rad) return true;
+// Would removing tower t change the route of any creep on the board (or of the next spawn)?
+// Routes are followed cell by cell with S.nextCell, so the route from a cell is unchanged iff every cell on it
+// picks the same next cell with and without the tower. We walk the union of all current routes once.
+function saleChangesRoute(b, t) {
+  const tk = key(t.c, t.r);
+  const nd = S.computeDist((c, r) => { const k = key(c, r); return k !== tk && b.towers.has(k); });
+  const seen = new Uint8Array(S.COLS * S.ROWS);
+  const starts = [[S.SPAWN.c, S.SPAWN.r]];
+  for (const cr of b.creeps) starts.push(cr.nc !== null ? [cr.nc, cr.nr] : [cr.c, cr.r]);
+  for (const [c0, r0] of starts) {
+    let c = c0, r = r0;
+    for (let guard = 0; guard < S.COLS * S.ROWS; guard++) {
+      const i = c + r * S.COLS;
+      if (seen[i]) break;
+      seen[i] = 1;
+      if (c === S.BASE.c && r === S.BASE.r) break;
+      const a = S.nextCell(b.dist, c, r), n = S.nextCell(nd, c, r);
+      if (!a || !n) { if (a || n) return true; break; }
+      if (a.c !== n.c || a.r !== n.r) return true;
+      c = a.c; r = a.r;
+    }
+  }
   return false;
 }
 
@@ -228,13 +247,15 @@ function stepBoard(room, team) {
     b.queue.sort((a, c) => a.at - c.at);
     while (b.queue.length && b.queue[0].at <= g.time) spawnCreep(g, b, b.queue.shift());
   }
-  // queued sells execute as soon as the board is clear, or after SELL_MAX_WAIT s once no creep is near the tower
+  // queued sells execute as soon as the board is clear; on a busy board after SELL_MAX_WAIT s if removing the tower
+  // reroutes nobody, and after SELL_HARD_CAP s no matter what (so trickle sends can't lock towers in place)
   let anySell = false; for (const t of b.towers.values()) if (t.sellAt !== null) { anySell = true; break; }
   if (anySell) {
     const busy = boardBusy(g, b);
     for (const t of [...b.towers.values()]) {
       if (t.sellAt === null) continue;
-      if (!busy || (g.time - t.sellAt >= S.SELL_MAX_WAIT && !creepNear(b, t, S.SELL_CLEAR_RADIUS))) finishSell(room, b, t);
+      const waited = g.time - t.sellAt + 1e-9;
+      if (!busy || waited >= S.SELL_HARD_CAP || (waited >= S.SELL_MAX_WAIT && !saleChangesRoute(b, t))) finishSell(room, b, t);
     }
   }
   // move creeps
@@ -346,4 +367,4 @@ function decide(room, prefix) {
   room.phase = 'over';
 }
 
-module.exports = { TICK, DT, key, other, createGame, stepGame, build, upgrade, sell, doSend, upgradeSend, tierOf, canBuild, teamSizeOf, addGold, addIncome, boardBusy, _damage: damage, _slow: slow };
+module.exports = { TICK, DT, key, other, createGame, stepGame, build, upgrade, sell, doSend, upgradeSend, tierOf, canBuild, teamSizeOf, addGold, addIncome, boardBusy, saleChangesRoute, _damage: damage, _slow: slow };

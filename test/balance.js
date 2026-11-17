@@ -30,6 +30,20 @@ function botAct(room, p, strat, rng) {
       p._saving = G.tierOf(p, k) === t ? uf : 0; // still wanted: defense must leave the upgrade share banked
     } else p._saving = 0;
   } else p._saving = 0;
+  // QA: 'eco' = never sends, buys every send tier as a pure income investment (share eco of all spending)
+  if (strat.eco) for (const k of ['runner', 'swarm', 'brute']) {
+    const t = G.tierOf(p, k); if (t >= 3 || g.wave < S.SEND_UP.UNLOCK_WAVE[t + 1]) continue;
+    const cost = S.sendUpCost(k, t), total = p._def + p._send + (p._up || 0);
+    if (p.gold >= cost && (p._up || 0) + cost <= strat.eco * (total + cost) + 1e-9 && !G.upgradeSend(room, p, k)) p._up = (p._up || 0) + cost;
+  }
+  // QA: 'free' = tiers granted for free at each unlock wave (upper bound on tier value)
+  if (strat.free) for (const k of Object.keys(strat.free)) { if (!p.sendTier) continue; let t = p.sendTier[k]; while (t < strat.free[k] && g.wave >= S.SEND_UP.UNLOCK_WAVE[t + 1]) t++; p.sendTier[k] = t; }
+  // QA: 'upE' = E bot that also buys send tiers out of its SEND share when unlocked (no banking, same total share as E)
+  if (strat.upE && strat.send > 0) for (const k of kinds) {
+    const t = G.tierOf(p, k); if (t >= (strat.upE === true ? 3 : strat.upE) || g.wave < S.SEND_UP.UNLOCK_WAVE[t + 1]) continue;
+    const cost = S.sendUpCost(k, t), total = p._def + p._send + (p._up || 0);
+    if (p.gold >= cost && p._send + cost <= strat.send * (total + cost) + 1e-9 && !G.upgradeSend(room, p, k)) p._send += cost;
+  }
   // burst: k -> bank the send budget and dump it all on every k-th wave (tests unlimited sends per wave)
   const sendNow = !strat.burst || (g.wave > 0 && g.wave % strat.burst === 0 && g.nextWave > S.WAVE_EVERY - 6);
   for (let guard = 0; guard < (strat.burst ? 200 : 5) && strat.send > 0 && sendNow; guard++) {
@@ -86,12 +100,13 @@ function run(label, stratsL, stratsR, opts = {}) {
     for (const p of room.players.values()) if (ticks >= nextAct.get(p.id)) { botAct(room, p, strat.get(p.id)); nextAct.set(p.id, ticks + 3 + Math.floor(rnd() * 6)); }
     G.stepGame(room);
     if (opts.onEvent) for (const e of g.events) opts.onEvent(e, g);
+    if (opts.onTick) opts.onTick(room);
     g.events.length = 0;
   }
   const players = [...room.players.values()];
   return { label, winner: g.winner || 'timeout', reason: g.winReason, min: +(g.time / 60).toFixed(1), wave: g.wave, lives: [g.boards.L.lives, g.boards.R.lives],
     inc: players.map((p) => p.team + p.income).join(' '), sent: players.map((p) => p.sent).join('/'),
-    tiers: players.map((p) => Object.values(p.sendTier || {}).join('')).join('/') };
+    tiers: players.map((p) => Object.values(p.sendTier || {}).join('')).join('/'), spend: players.map((p) => [p._def, p._send, p._up || 0]) };
 }
 module.exports = { run, ORDER };
 

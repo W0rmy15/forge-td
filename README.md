@@ -1,4 +1,4 @@
-# Forge TD v0.4 — online versus tower defense (1v1 / 2v2)
+# Forge TD v0.5 — online versus tower defense (1v1 / 2v2)
 
 A top-down, browser-based **versus tower defense** game. Two teams (Left vs Right), 1–2 players each.
 Teammates share one maze and defend together; you spend gold to **send creeps** at the other team,
@@ -63,7 +63,7 @@ The quick-tunnel URL changes each time cloudflared restarts.
 | Select tower type to build | `1` Arrow · `2` Cannon · `3` Frost (or click the buttons) |
 | Build | Left-click an empty cell on your side (ghost turns red if invalid) |
 | Select a tower | Left-click it (shows range + stats) |
-| Upgrade / Sell selected tower | `U` / `X` twice (or the buttons; the first press asks to confirm) — sell refunds 70%. While creeps are on your board (or a spawn is due within 2 s) the sale is **queued**: the tower keeps firing, shows a 💲, and is sold the moment your board is clear, or after 10 s once no creep is within 3 cells of it. Press `X` on it again to cancel. Holding a key down does not auto-repeat sends, upgrades or sells. |
+| Upgrade / Sell selected tower | `U` / `X` twice (or the buttons; the first press asks to confirm) — sell refunds 70%. While creeps are on your board (or a spawn is due within 2 s) the sale is **queued**: the tower keeps firing, shows a 💲, and is sold the moment your board is clear, or after 10 s if removing it changes no creep's route, or after 20 s no matter what (so a trickle of sends can't lock your towers in place). Press `X` on it again to cancel. Holding a key down does not auto-repeat sends, upgrades or sells. |
 | Send creeps | `Q` Runner · `W` Brute · `E` Swarm |
 | Upgrade a send type (next tier) | `Shift+Q` / `Shift+W` / `Shift+E`, or the ⬆ button under each send |
 | Cancel | `Esc` or right-click |
@@ -85,16 +85,17 @@ than new towers (new towers also lengthen your maze).
 | Send | HP (× wave creep) | Defender's bounty | Lane time |
 |---|---|---|---|
 | Runner (Q) — 35g, +2 income, fast | 2.1× | 9g | 0.9 s |
-| Brute (W) — 70g, +4 income, slow, leaks cost 2 | 10.5× | 24g | 3 s |
+| Brute (W) — 70g, +4 income, slow, very tanky | 10.5× | 24g | 3 s |
 | Swarm (E) — 50g, +3 income, five small creeps | 0.9× each | 3g each | 2.25 s |
 
-Sent creeps follow the neutral wave HP curve. In 2v2 they get ×1.8 HP up to wave 6, rising linearly to
+Sent creeps follow the neutral wave HP curve. In 2v2 they get ×1.5 HP up to wave 6, rising linearly to
 ×2.99 (= 2.3 team scale × 1.3 two-attacker bonus) at wave 16. On top of that an early-game ramp (×0.26 at wave 1 rising
 to ×1 at wave 14) means a rush can't flatten a defense before it exists.
 The income you gain per send shrinks as your send income grows (`income × 120 / (120 + income already gained from sends)`).
 Sends are unlimited (there is no per-wave cap), but each enemy board has a single send lane: every send occupies it for
 its lane time, so banked gold dumped at once trickles in. To protect the server, a send is refused with **"Lane full"**
 when the lane is already booked more than **45 s** ahead (wait a moment and send again; you are not charged).
+Each board in the state message carries `lane` (seconds its send lane is booked ahead) and `laneFull` (1 while sends to it are refused).
 Sudden-death HP and leak multipliers are applied when a sent creep actually enters the board.
 The panel shows how many sent creeps are queued on each side, and enemy sends show up as one combined
 "Incoming enemy sends" toast.
@@ -108,11 +109,11 @@ Higher tiers look different: a bronze, silver or gold ring, and extra gear (helm
 
 | Tier | Unlocks | Upgrade price | HP | Send price / income | Defender's bounty | Extra trait |
 |---|---|---|---|---|---|---|
-| 1 | wave 8 | Runner 70 · Brute 140 · Swarm 100 | ×1.2 | ×1.1 | ×1.2 | — |
-| 2 | wave 12 | Runner 123 · Brute 245 · Swarm 175 | ×1.5 | ×1.2 | ×1.5 | Runner +20% speed · Brute armor (−40% Arrow damage) · Swarm 6 per send |
-| 3 | wave 16 | Runner 193 · Brute 385 · Swarm 275 | ×1.85 | ×1.3 | ×1.85 | Runner +35% speed · Brute −50% Arrow damage and half slow · Swarm 7 per send |
+| 1 | wave 8 | Runner 61 · Brute 123 · Swarm 88 | ×1.2 | ×1.1 | ×1.2 | — |
+| 2 | wave 12 | Runner 105 · Brute 210 · Swarm 150 | ×1.5 | ×1.2 | ×1.5 | Runner +20% speed · Brute armor (−40% Arrow damage) · Swarm 6 per send |
+| 3 | wave 16 | Runner 175 · Brute 350 · Swarm 250 | ×1.85 | ×1.3 | ×1.85 | Runner +35% speed · Brute −50% Arrow damage and half slow · Swarm still 6 per send |
 
-Buying a tier also adds a little income (5% of its price, with the same falloff as sends). The bounty grows with the HP,
+Buying a tier also adds a little income (3% of its price, with the same falloff as sends). The bounty grows with the HP,
 so defenders earn the same gold per HP killed. All numbers live in `public/shared.js` (`SEND_UP`, `SEND_TRAITS`) for easy tuning.
 
 ## Server limits
@@ -126,7 +127,7 @@ The server protects itself from abusive clients. Defaults can be changed with en
 | Chat per socket | 2/s, burst 4 | — |
 | Connections total / per IP | 400 / 24 | `MAX_CONNECTIONS`, `MAX_CONN_PER_IP` |
 | Trust the last `X-Forwarded-For` hop for the per-IP key | off: the socket address is used | `TRUST_PROXY=1` |
-| Trust `CF-Connecting-IP` / `True-Client-IP` (Cloudflare) | off | `TRUST_CF=1` |
+| Trust `CF-Connecting-IP` (Cloudflare) | off | `TRUST_CF=1` |
 | Send lane booked ahead | 45 s ("Lane full") | — (`LANE_MAX_AHEAD` in shared.js) |
 | Rooms | 150 | `MAX_ROOMS` |
 | Socket that never creates/joins a room | closed after 30 s | `JOIN_TIMEOUT_MS` |
@@ -135,8 +136,8 @@ The server protects itself from abusive clients. Defaults can be changed with en
 proxy appended). `CF-Connecting-IP` and `True-Client-IP` are **ignored** unless `TRUST_CF=1`, because any client can
 send them and a plain reverse proxy passes them through.
 **Render (behind Cloudflare):** set **both** `TRUST_PROXY=1` and `TRUST_CF=1` (both are in `render.yaml`; on an existing
-service, add `TRUST_CF=1` in the dashboard). With `TRUST_CF=1` the key is `CF-Connecting-IP`, then `True-Client-IP`, then
-the last `X-Forwarded-For` hop. Only set `TRUST_CF=1` when every request really comes through Cloudflare. Don't set either
+service, add `TRUST_CF=1` in the dashboard). With `TRUST_CF=1` the key is `CF-Connecting-IP`, then
+the last `X-Forwarded-For` hop. `True-Client-IP` is never trusted (Cloudflare only sets it on Enterprise plans). Only set `TRUST_CF=1` when every request really comes through Cloudflare. Don't set either
 when the server is reachable directly, or the cap can be dodged.
 
 If a game tick ever throws, the error is logged once and that room is reset to the lobby (other rooms keep running).
@@ -146,7 +147,10 @@ If a game tick ever throws, the error is logged once and that room is reset to t
 ```bash
 npm run test:balance                          # in-process balance sim incl. send-tier upgrader bots, 5 seeds each, ~30 s
 # with a server running on port 8080:
-npm run test:sim                              # in-process rule checks: queued sales + max wait, send scaling/lane limit, send tiers, sudden death
+npm run test:sim                              # in-process rule checks: queued sales (max wait, route check, hard cap, trickle), send scaling/lane limit, send tiers, sudden death
+node test/juggle.js                           # sell/rebuild juggling regression (v0.5)
+node test/wirebytes.js                        # state message size v0.4 vs v0.5 encoding + decode round trip
+node test/tune.js [variant]                   # balance variant sweep (QA's tune4 rows; ~1 min per variant)
 npm run test:matrix                           # send-vs-defense matrix incl. 'bank and dump' senders and upgraders (~1 min)
 npm test                                      # bots + maze + exploit + v0.3 checks (takeover, join errors, proxy headers, queued sale)
 node test/bots.js ws://localhost:8080 4 60    # 4 bots (2v2) join, start, build, upgrade, sell, send for 60 s
@@ -173,6 +177,7 @@ For faster simulated games run the server with `SPEED=20 PORT=8090 node server.j
 ```
 server.js          HTTP static server + WebSocket server (rooms, lobby, limits, snapshots)
 game.js            Pure game simulation (waves, towers, sends, win/tiebreak), used by server.js and test/balance.js
+wire.js            Compact state encoding (creeps, shots, lane info); decoded by SHARED.decodeState in public/shared.js
 public/shared.js   All tuning constants (economy, towers, sends, waves, sudden death) + BFS pathfinding, shared by server & client
 public/client.js   Lobby UI, canvas renderer (cached board layer, particle pool), input
 public/art.js      Procedural cartoon sprites (towers, creeps, board, icons), cached per size

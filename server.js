@@ -6,11 +6,12 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const S = require('./public/shared.js');
 const G = require('./game.js');
+const WIRE = require('./wire.js');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const SPEED = Math.min(50, Math.max(1, parseInt(process.env.SPEED || '1', 10))); // sim steps per tick (testing only)
 const PUB = path.join(__dirname, 'public');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.ttf': 'font/ttf', '.otf': 'font/otf', '.woff': 'font/woff', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.json': 'application/json', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
 
 // ---- abuse limits (override with env vars) ----
 const LIMITS = {
@@ -118,10 +119,12 @@ function boardsMsg(room, full) {
   const g = room.game, out = {};
   for (const t of ['L', 'R']) {
     const b = g.boards[t];
+    const ln = WIRE.laneInfo(g, b);
     const o = {
       lives: b.lives, leak: b.leakFlash > 0 ? 1 : 0, tv: b.towerVer, busy: G.boardBusy(g, b) ? 1 : 0, // busy = sales are queued (same rule as the server)
-      creeps: b.creeps.map((c) => [c.id, c.kind, +c.x.toFixed(2), +c.y.toFixed(2), Math.ceil(c.hp), c.maxHp, g.time < c.slowUntil ? 1 : 0, c.radius, c.v || 0]),
+      creeps: WIRE.encodeCreeps(g, b), // compact: decoded by S.decodeState
       queued: b.queue.length, queuedSends: b.queue.reduce((n, q) => n + (q.from ? 1 : 0), 0),
+      lane: ln.lane, laneFull: ln.laneFull, // send lane INTO this board: seconds booked ahead, and 1 when sends to it are refused
     };
     if (full || room.sentTv[t] !== b.towerVer) {
       o.towers = [...b.towers.values()].map((tw) => [tw.id, tw.c, tw.r, tw.type, tw.lvl, tw.owner, tw.sellAt !== null ? 1 : 0]);
@@ -138,18 +141,20 @@ function playersFor(room, team) {
     return o;
   });
 }
-function stateFor(room, team, boards) {
+function stateFor(room, team, boards, split) {
   const g = room.game;
+  if (!split) split = WIRE.splitEvents(g.events);
   return JSON.stringify({
     t: 's', phase: room.phase, time: +g.time.toFixed(2), wave: g.wave, nextIncome: +g.nextIncome.toFixed(1), nextWave: +g.nextWave.toFixed(1),
     winner: g.winner, winReason: g.winReason, sd: g.suddenDeath ? 1 : 0, fin: g.finishing, teamSize: g.teamSize,
-    boards, ev: g.events, players: playersFor(room, team),
+    boards, sh: split.sh, ev: split.ev, players: playersFor(room, team),
   });
 }
 function broadcastState(room, forceFull) {
   const full = forceFull || room.tick % KEYFRAME_TICKS === 0;
   const boards = boardsMsg(room, full);
-  const msgs = { L: stateFor(room, 'L', boards), R: stateFor(room, 'R', boards) };
+  const split = WIRE.splitEvents(room.game.events);
+  const msgs = { L: stateFor(room, 'L', boards, split), R: stateFor(room, 'R', boards, split) };
   for (const p of room.players.values()) send(p.ws, msgs[p.team]);
   room.sentTv = { L: room.game.boards.L.towerVer, R: room.game.boards.R.towerVer };
 }
@@ -302,16 +307,16 @@ function take(b, rate, burst) {
 // Per-IP limits key on the socket address. Proxy headers can be forged by any client, so they are only
 // trusted when told to:
 //   TRUST_PROXY=1 -> the LAST X-Forwarded-For hop (the one appended by the proxy in front of us).
-//   TRUST_CF=1    -> CF-Connecting-IP / True-Client-IP first. Only set this when the edge really is Cloudflare
-//                    (Cloudflare overwrites/rejects client-supplied values; any other edge passes them through).
+//   TRUST_CF=1    -> CF-Connecting-IP first. Only set this when the edge really is Cloudflare (Cloudflare overwrites
+//                    client-supplied values; any other edge passes them through). True-Client-IP is never trusted:
+//                    Cloudflare only sets it on Enterprise plans, so elsewhere it is client-controlled.
 const TRUST_PROXY = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY || '');
 const TRUST_CF = /^(1|true|yes)$/i.test(process.env.TRUST_CF || '');
 function clientIp(req) {
   const h = req.headers;
   if (TRUST_CF) {
-    for (const k of ['cf-connecting-ip', 'true-client-ip']) {
-      if (typeof h[k] === 'string' && h[k].trim()) return h[k].trim();
-    }
+    const cf = h['cf-connecting-ip'];
+    if (typeof cf === 'string' && cf.trim()) return cf.trim();
   }
   if (TRUST_PROXY || TRUST_CF) {
     const xf = h['x-forwarded-for'];
