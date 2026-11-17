@@ -164,8 +164,8 @@
   // ---------- game UI ----------
   const buildBtns = {}, sendBtns = {}, upBtns = {};
   const AIcon = window.ART, iconCache = {};
-  const towerIcon = (k) => iconCache['t' + k] || (iconCache['t' + k] = AIcon.iconURL(AIcon.tower(k, 0), 36, 1.22));
-  const creepIcon = (k, tier) => iconCache['c' + k + tier] || (iconCache['c' + k + tier] = AIcon.iconURL(AIcon.creep(k, tier, k === 'swarm' ? 7 : k === 'brute' ? 9.5 : 8), 36, 1.18));
+  const towerIcon = (k) => iconCache['t' + k] || (iconCache['t' + k] = AIcon.iconURL(AIcon.tower(k, 0), 48, 1.28));
+  const creepIcon = (k, tier) => iconCache['c' + k + tier] || (iconCache['c' + k + tier] = AIcon.iconURL(AIcon.creep(k, tier, k === 'swarm' ? 7 : k === 'brute' ? 9.5 : 8), 48, 1.32));
   const pips = (t) => '<span class="pips">' + [1, 2, 3].map((i) => `<i class="${i <= t ? 'on' : ''}"></i>`).join('') + '</span>';
   for (const [k, t] of Object.entries(S.TOWERS)) {
     const b = document.createElement('button');
@@ -572,7 +572,7 @@
     } else if (e.k === 'kill') {
       const x = bx(e.b, e.x), y = by(e.y), col = AR.creepColor(e.kind, e.v), big = e.kind === 'boss' || e.kind === 'brute';
       const f = spawnP('pop', x, y, 170); if (f) { f.s = big ? 16 : 10; f.col = '#ffffff'; }
-      const n = big ? 12 : e.kind === 'swarm' ? 5 : 8;
+      const n = (big ? 12 : e.kind === 'swarm' ? 5 : 8) >> (lowDetail ? 1 : 0);
       for (let i = 0; i < n; i++) { const a = (i / n) * 6.28 + Math.random() * 0.5, sp = 0.05 + Math.random() * 0.07; const p = spawnP('conf', x, y, 420 + Math.random() * 250); if (p) { p.vx = Math.cos(a) * sp; p.vy = Math.sin(a) * sp - 0.03; p.col = i % 3 === 0 ? '#ffffff' : col; p.s = 1.8 + Math.random() * 2; p.vr = (Math.random() - 0.5) * 0.03; } }
       if (e.o === you) { const t = spawnP('text', x, y - 6, 900); if (t) { t.txt = '+' + e.g; t.col = '#ffd23a'; t.s = e.g >= 10 ? 15 : 12; } }
     } else if (e.k === 'leak') {
@@ -607,8 +607,9 @@
       } else if (p.t === 'ring') {
         ctx.globalAlpha = (1 - k) * 0.9; ctx.strokeStyle = `rgba(${p.col},1)`; ctx.lineWidth = 3.5 * (1 - k) + 1;
         ctx.beginPath(); ctx.arc(p.x, p.y, p.s * (0.35 + 0.75 * k), 0, 6.283); ctx.stroke();
-        ctx.fillStyle = `rgba(${p.col},${(p.soft ? 0.1 : 0.22) * (1 - k)})`; ctx.fill(); ctx.globalAlpha = 1;
+        if (!lowDetail) { ctx.fillStyle = `rgba(${p.col},${(p.soft ? 0.1 : 0.22) * (1 - k)})`; ctx.fill(); } ctx.globalAlpha = 1;
       } else if (p.t === 'puff') {
+        if (lowDetail) continue;
         ctx.fillStyle = `rgba(${p.col},${0.75 * (1 - k)})`; ctx.beginPath(); ctx.arc(p.x, p.y + p.vy * age, p.s * (0.6 + k), 0, 6.283); ctx.fill();
       } else if (p.t === 'flake') {
         ctx.globalAlpha = 1 - k; ctx.fillStyle = '#ffffff'; AR.star(ctx, p.x + p.vx * age, p.y + p.vy * age, p.s, 6, 0.4); ctx.fill(); ctx.globalAlpha = 1;
@@ -674,6 +675,17 @@
   const prevMaps = { L: new Map(), R: new Map() };
   function buildPrev() { for (const b of ['L', 'R']) { const m = prevMaps[b]; m.clear(); if (prevState) for (const c of prevState.boards[b].creeps) m.set(c[0], c); } }
   let bgGrad = null, frameStats = { n: 0, total: 0, max: 0 };
+  // Low-detail mode on crowded boards: no creep shadows, no translucent ring/puff fills, fewer kill chips.
+  const LOW_ON = 220, LOW_OFF = 180; let lowDetail = false;
+  window.__ftdLowDetail = () => lowDetail; // read-only hook (tests)
+  let leakCv = null;
+  function leakGlow() {
+    if (leakCv) return leakCv;
+    leakCv = document.createElement('canvas'); leakCv.width = leakCv.height = 128;
+    const g = leakCv.getContext('2d'), gr = g.createRadialGradient(64, 64, 2, 64, 64, 64);
+    gr.addColorStop(0, 'rgba(255,40,60,0.42)'); gr.addColorStop(1, 'rgba(255,40,60,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 128, 128); return leakCv;
+  }
   window.__ftdFrameStats = () => ({ frames: frameStats.n, avgMs: frameStats.n ? +(frameStats.total / frameStats.n).toFixed(3) : 0, maxMs: +frameStats.max.toFixed(3) }); // read-only perf hook
   window.__ftdResetFrameStats = () => { frameStats = { n: 0, total: 0, max: 0 }; };
 
@@ -685,8 +697,10 @@
     const m = me();
     const pmap = new Map(state.players.map((p) => [p.id, p]));
     const d = dists();
+    const nCreeps = state.boards.L.creeps.length + state.boards.R.creeps.length;
+    lowDetail = lowDetail ? nCreeps > LOW_OFF : nCreeps > LOW_ON; // hysteresis
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (!bgGrad) { bgGrad = ctx.createLinearGradient(0, 0, 0, H); bgGrad.addColorStop(0, '#1c1410'); bgGrad.addColorStop(0.6, '#2a2018'); bgGrad.addColorStop(1, '#1a1814'); }
+    if (!bgGrad) { bgGrad = ctx.createLinearGradient(0, 0, 0, H); bgGrad.addColorStop(0, '#3a2a1c'); bgGrad.addColorStop(0.6, '#4a3420'); bgGrad.addColorStop(1, '#3a2c1c'); }
     ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, W, H);
     for (const b of ['L', 'R']) {
       const B = state.boards[b], x0 = BX[b];
@@ -697,9 +711,8 @@
       headerText(String(B.lives), x0 + BW, 22, B.leak ? '#ff6b6b' : '#ffffff', 'right', 18);
       if (B.leak) {
         const lx = x0 + (S.BASE.c + 0.5) * CELL, ly = TOP + (S.BASE.r + 0.5) * CELL;
-        const lg = ctx.createRadialGradient(lx, ly, 8, lx, ly, CELL * 5.5);
-        lg.addColorStop(0, 'rgba(255,40,60,0.42)'); lg.addColorStop(1, 'rgba(255,40,60,0)');
-        ctx.fillStyle = lg; ctx.fillRect(x0, TOP, BW, BH);
+        const lg = leakGlow(), lr = CELL * 5.5; // cached sprite, only the castle area (no full-board alpha fill)
+        ctx.drawImage(lg, lx - lr, ly - lr, lr * 2, lr * 2);
       }
       // portal swirl
       { const px = x0 + (S.SPAWN.c + 0.5) * CELL, py = TOP + (S.SPAWN.r + 0.5) * CELL; ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2;
@@ -735,7 +748,7 @@
       }
       // creeps (interpolated): shadows, bodies, then health bars
       const prev = prevMaps[b], creeps = B.creeps;
-      for (let pass = 0; pass < 3; pass++) {
+      for (let pass = lowDetail ? 1 : 0; pass < 3; pass++) {
         for (let i = 0; i < creeps.length; i++) {
           const cr = creeps[i], p = prev.get(cr[0]);
           let cx = cr[2], cy = cr[3];
@@ -750,7 +763,7 @@
             const sp = AR.creep(kind, cr[8], R), w = sp.w * sq * hitSq, h = sp.h / sq / hitSq;
             ctx.drawImage(sp.c, px - w / 2, py - lift - h / 2 + (sp.h - h) * 0.3, w, h);
             if (hitK) { const f = AR.creepFlash(R); ctx.globalAlpha = 0.85 * hitK; ctx.drawImage(f.c, px - f.w * hitSq / 2, py - lift - f.h / 2, f.w * hitSq, f.h); ctx.globalAlpha = 1; }
-            if (cr[6]) { const ic = AR.creepIce(R); ctx.drawImage(ic.c, px - ic.w / 2, py - lift - ic.h / 2, ic.w, ic.h); }
+            if (cr[6] && !lowDetail) { const ic = AR.creepIce(R); ctx.drawImage(ic.c, px - ic.w / 2, py - lift - ic.h / 2, ic.w, ic.h); }
           }
         }
         // pass 2: one shared HP bar per stack, only on damaged creeps.
