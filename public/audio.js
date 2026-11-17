@@ -24,6 +24,10 @@
   var BUCKET_RATE = 28, BUCKET_BURST = 12, tokens = 12, tokenAt = 0;
   var emaMs = 16.7, lastRaf = 0, longStreak = 0, goodStreak = 0, lagging = false, lagUntil = 0;
   var frameGen = 0, rafOn = false, lastPlayFrame = -1, playsThisFrame = 0;
+  // Refresh-rate-relative cheap mode: baseline is a rolling median of vsync-like frames, clamped to 6–21 ms
+  // (144 Hz … 50 Hz). Absolute 14/16/20 ms thresholds wrongly treat 60 Hz as "never recovered" and 50 Hz as lag.
+  var baseSamples = [], baseline = 16.7, haveBase = false;
+  var BASE_MIN = 6, BASE_MAX = 21, BASE_NEED = 20, BASE_CAP = 45;
 
   // Inharmonic metal partials (not a harmonic series — sounds like struck iron, not a bell copy).
   var METAL = [1, 1.34, 1.77, 2.21, 2.92, 3.61, 4.45, 5.43];
@@ -104,8 +108,23 @@
   safe(startRafWatch);
 
   // Frame-time watch: EMA of rAF deltas, ignoring hidden tabs and tab-switch gaps.
-  // Enter lagging (cheap) when EMA > 20 ms or 3 frames in a row exceed 33 ms; leave after
-  // a stretch of good frames (hysteresis) so a single hitch doesn't flap the mode.
+  // Thresholds are relative to a measured vsync baseline so 50/60/75/144 Hz all recover after a hitch.
+  function medianOf(a) {
+    var b = a.slice(), n = b.length, m;
+    b.sort(function (x, y) { return x - y; });
+    m = n >> 1;
+    return n % 2 ? b[m] : (b[m - 1] + b[m]) / 2;
+  }
+  function sampleBaseline(dt) {
+    var hi = haveBase ? Math.min(24, baseline * 1.4 + 4) : 24;
+    if (dt < 5.5 || dt > hi) return;
+    if (baseSamples.length >= BASE_CAP) baseSamples.shift();
+    baseSamples.push(dt);
+    if (baseSamples.length >= BASE_NEED) {
+      baseline = clamp(medianOf(baseSamples), BASE_MIN, BASE_MAX);
+      haveBase = true;
+    }
+  }
   function startRafWatch() {
     if (rafOn || !root.requestAnimationFrame) return;
     rafOn = true;
@@ -120,12 +139,18 @@
       lastRaf = ts;
       if (dt < 4 || dt > 250) return; // first tick after a tab hide/show, or nonsense
       emaMs += 0.22 * (dt - emaMs);
-      if (dt > 33) longStreak++; else longStreak = 0;
-      if (emaMs < 14 && dt < 22) goodStreak++; else goodStreak = 0;
+      sampleBaseline(dt);
+      if (!haveBase) return; // don't judge lag until we know the refresh rate
+      var longLim = Math.max(33, baseline * 2.5);
+      var goodLim = baseline * 1.25 + 3;
+      var emaExit = baseline * 1.25 + 2;
+      var emaEnter = baseline * 1.6 + 4;
+      if (dt > longLim) longStreak++; else longStreak = 0;
+      if (dt < goodLim && emaMs < emaExit) goodStreak++; else goodStreak = 0;
       var now = ts;
-      if (!lagging && (emaMs > 20 || longStreak >= 3)) {
+      if (!lagging && (emaMs > emaEnter || longStreak >= 3)) {
         lagging = true; goodStreak = 0; lagUntil = now + 500;
-      } else if (lagging && now > lagUntil && goodStreak >= 24 && emaMs < 16) {
+      } else if (lagging && now > lagUntil && goodStreak >= 24 && emaMs < emaExit) {
         lagging = false;
       }
     };
@@ -868,7 +893,8 @@
   function stats() {
     return {
       load: load, tokens: +tokens.toFixed(2), nodes: nodeCount, rate: bucketRate(),
-      emaMs: +emaMs.toFixed(1), lagging: lagging, cheap: stressed()
+      emaMs: +emaMs.toFixed(1), lagging: lagging, cheap: stressed(),
+      baseline: +baseline.toFixed(2), haveBase: haveBase
     };
   }
   function resetStats() { nodeCount = 0; }
