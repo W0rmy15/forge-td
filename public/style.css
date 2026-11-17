@@ -28,7 +28,7 @@ button:hover{filter:brightness(1.08)}
 button:active{transform:translateY(3px);box-shadow:0 1px 0 var(--out)}
 button:disabled{filter:grayscale(.75) brightness(.95);opacity:.6;cursor:default;transform:none}
 button.big{font-size:20px;padding:10px 24px}
-button.go{background:linear-gradient(#7ee35b,#3fbf3a);color:#fff;-webkit-text-stroke:3px var(--out);paint-order:stroke fill;box-shadow:0 4px 0 var(--out),0 0 14px rgba(80,200,60,.3)}
+button.go{background:linear-gradient(#ffc44a,#e86a12);color:#fff;-webkit-text-stroke:3px var(--out);paint-order:stroke fill;box-shadow:0 4px 0 var(--out),0 0 16px rgba(255,120,20,.45)}
 button.blue{background:linear-gradient(#8aa4b8,#4a6a88);color:#fff;-webkit-text-stroke:3px var(--out);paint-order:stroke fill}
 button.red{background:linear-gradient(#c45830,#8a2818);color:#fff;-webkit-text-stroke:3px var(--out);paint-order:stroke fill}
 .team.L .teamBtn,.teamBtn.blue{background:linear-gradient(#e8b44a,#c4923a);color:#1a1512;-webkit-text-stroke:0}
@@ -55,7 +55,12 @@ canvas#cv{border-radius:14px;cursor:crosshair;border:4px solid var(--out);box-sh
 #panel{width:292px;background:linear-gradient(180deg,#3a3530,#2c2824);border:4px solid var(--out);border-radius:14px;padding:10px 12px;font-size:14px;box-shadow:0 6px 0 var(--out),inset 0 1px 0 rgba(255,220,160,.12)}
 #panel h3{margin:10px 0 6px;font-size:15px;color:#ffc44a}
 #panel h3 small{color:var(--muted);font-weight:500;font-size:11px}
-.stats{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.stats{display:grid;grid-template-columns:1fr 1fr 76px;gap:6px;align-items:stretch}
+.stats>.stat.gold{grid-column:1;grid-row:1}
+.stats>.stat.inc{grid-column:2;grid-row:1}
+.stats>#audCtrl{grid-column:3;grid-row:1/span 2;flex-direction:column;justify-content:center;align-items:stretch;gap:4px;margin:0;min-width:0}
+.stats>.stat.small:nth-child(4){grid-column:1;grid-row:2}
+.stats>.stat.small:nth-child(5){grid-column:2;grid-row:2}
 .stat{display:flex;justify-content:space-between;align-items:center;padding:2px 2px;font-size:15px}
 .stats .stat.gold,.stats .stat.inc{flex-direction:column;align-items:flex-start;background:linear-gradient(#5a4018,#3a2a10);border:3px solid var(--out);border-radius:10px;padding:3px 10px;box-shadow:inset 0 1px 0 rgba(255,196,74,.25)}
 .stats .stat.inc{background:linear-gradient(#1a3a32,#0e2420)}
@@ -78,7 +83,7 @@ canvas#cv{border-radius:14px;cursor:crosshair;border:4px solid var(--out);box-sh
 .ubtn.max{background:linear-gradient(#fff0b0,#ffc44a)}
 .pips{display:flex;gap:2px;margin-top:1px}.pips i{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--out);background:#1a1614}.pips i.on{background:#ffc44a}
 .tiers{display:inline-flex;gap:3px;margin-left:4px;vertical-align:middle}
-.tb{position:relative;display:inline-block;width:22px;height:22px}.tb img{width:22px;height:22px}
+.tb{position:relative;display:inline-block;width:30px;height:30px}.tb img{width:30px;height:30px}
 .tb b{position:absolute;right:-3px;bottom:-3px;background:#ffc44a;border:1.5px solid var(--out);border-radius:6px;font-size:9px;line-height:11px;padding:0 2px;color:var(--out)}
 #enemyTiers .et{display:flex;align-items:center;gap:4px;background:#3a2018;border:2px solid var(--out);border-radius:8px;padding:2px 6px;margin-bottom:4px;font-weight:600}
 .rn{font-weight:600}
@@ -137,27 +142,27 @@ button.danger{background:linear-gradient(#c45830,#8a2818);color:#fff}
 /* Compact the side panel so chat + key help stay on screen at 768 / 820 px tall.
    Roster tier icons are hidden here (they duplicate the Enemy send tiers row). */
 #roster .tiers{display:none}
-#panel{width:280px;padding:6px 8px;font-size:13px;max-height:min(660px,calc(100vh - 16px));overflow-y:auto}
-#panel h3{margin:5px 0 3px;font-size:13px}
+#panel{width:280px;padding:4px 6px;font-size:13px;max-height:calc(100vh - 8px);overflow-y:auto}
+#panel h3{margin:2px 0 1px;font-size:12px}
 #panel h3 small{font-size:10px}
 .stats{gap:4px}
 .stats .stat b{font-size:20px}
 .stats .stat.gold,.stats .stat.inc{padding:2px 8px;border-radius:10px}
-.stat.small{font-size:11.5px;padding:1px 2px}
+.stat.small{font-size:11px;padding:0 2px;white-space:nowrap;gap:4px}
 .btns{gap:5px}
 .btns button{padding:2px 1px 3px;font-size:11px}
 .btns button img{width:32px;height:32px}
 .scol{gap:3px}
 .ubtn{font-size:10px!important;padding:2px 1px!important}
 .pips{margin-top:0}.pips i{width:7px;height:7px}
-#enemyTiers .et{margin-bottom:2px;padding:1px 5px;font-size:12px}
-.sel{margin-top:6px;padding:6px}
-#roster .rteam{margin-top:2px;font-size:14px}
-#roster .rp{padding:1px 0;font-size:12px}
-#chatLog{height:46px;margin-top:4px;padding:3px 5px;font-size:11px}
-#chatInput{margin-top:3px;padding:3px 6px;font-size:11px}
-#panel>.hint{font-size:11px;margin:4px 0 0;line-height:1.3}
-#game.screen{padding:4px 8px}
+#enemyTiers .et{margin-bottom:1px;padding:1px 4px;font-size:11px;gap:4px}
+.sel{margin-top:3px;padding:4px}
+#roster .rteam{margin-top:1px;font-size:13px}
+#roster .rp{padding:0;font-size:11px;line-height:1.25}
+#chatLog{height:28px;margin-top:2px;padding:2px 5px;font-size:11px}
+#chatInput{margin-top:2px;padding:2px 6px;font-size:11px}
+#panel>.hint{font-size:9px;margin:1px 0 0;line-height:1.2}
+#game.screen{padding:4px 6px}
 
 /* lane-full overlay on send buttons */
 .scol{position:relative}
@@ -166,7 +171,15 @@ button.danger{background:linear-gradient(#c45830,#8a2818);color:#fff}
 .laneov[hidden]{display:none!important}
 
 /* sound controls — compact hammered-metal, matches the side panel */
-#audCtrl{align-items:center;gap:6px;margin:0 0 2px}
-#muteBtn{padding:2px 8px;min-width:36px;font-size:14px;line-height:1.2;border-radius:8px;box-shadow:0 2px 0 var(--out)}
+#audCtrl{align-items:stretch;gap:2px;margin:0;min-height:0}
+#muteBtn{padding:0 6px;min-width:28px;height:22px;font-size:13px;line-height:20px;border-radius:6px;border-width:2px;box-shadow:0 1px 0 var(--out)}
 #muteBtn[aria-pressed="true"]{background:linear-gradient(#4a3530,#2c201c);color:#ffc44a}
-#volSlider{flex:1;accent-color:#ff8a20;height:16px;background:transparent}
+#volSlider{flex:1;width:100%;accent-color:#ff8a20;height:14px;background:transparent}
+
+@media (max-width:1024px){
+  #game.screen{padding:2px}
+  .gamewrap{gap:4px}
+  #panel{width:252px;padding:4px 5px}
+  .stats{grid-template-columns:1fr 1fr 64px;gap:3px}
+  canvas#cv{border-width:3px;box-shadow:0 4px 0 var(--out),0 8px 16px rgba(0,0,0,.35)}
+}
