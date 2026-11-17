@@ -1,6 +1,6 @@
 {
   "name": "forge-td",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Online multiplayer versus tower defense (1v1 / 2v2) in the browser",
   "main": "server.js",
   "scripts": {

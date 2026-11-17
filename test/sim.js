@@ -132,6 +132,16 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
   check('trickle: tower beside the path sells within the hard cap', near !== null && near <= S.SELL_HARD_CAP + 0.1, { near });
   check('trickle: far tower sells after the max wait', far !== null && far <= S.SELL_MAX_WAIT + 0.1, { far });
 }
+// --- v0.5.1: 2v2 send income x SEND_TEAM2_INCOME, bounty x the 2v2 send HP multiplier; 1v1 unchanged ---
+{
+  for (const n of [1, 2]) {
+    const room = mkRoom(n), g = room.game, p = room.players.get(1); p.gold = 1e6; g.wave = 10;
+    const inc0 = p.income + p.incomeFrac; G.doSend(room, p, 'runner');
+    const q = g.boards.R.queue.filter((x) => x.from).pop(), spec = S.sendSpec('runner', 0);
+    const wantInc = spec.income * (n >= 2 ? S.SEND_TEAM2_INCOME : 1), wantB = Math.round(spec.bounty * (n >= 2 ? S.sendTeamMult(2, 10) : 1));
+    check(`${n}v${n}: send income gain ${wantInc} and bounty ${wantB}`, Math.abs(p.income + p.incomeFrac - inc0 - wantInc) < 1e-9 && q.bounty === wantB, { gain: +(p.income + p.incomeFrac - inc0).toFixed(3), bounty: q.bounty });
+  }
+}
 // --- v0.4: send upgrades ---
 {
   const room = mkRoom(), g = room.game, p = room.players.get(1); p.gold = 1e6; g.wave = 1;

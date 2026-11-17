@@ -1,6 +1,7 @@
 // v0.3 network checks: seat takeover (4001 'replaced'), join errors carry a code, per-IP cap vs forged proxy headers,
 // queued sales over the wire. Usage: node test/v03.js ws://localhost:PORT [trustproxy]
-// Run against a normal server; with "trustproxy" against TRUST_PROXY=1; with "trustcf" against TRUST_CF=1.
+// Run against a normal server (with FORGE_TEST_HOOKS=1 the queued-sale check also proves the 20 s hard cap);
+// with "trustproxy" against TRUST_PROXY=1; with "trustcf" against TRUST_CF=1.
 const { client, game, sleep, WebSocket } = require('./lib');
 const S = require('../public/shared.js');
 const URL_ = process.argv[2] || 'ws://localhost:8080';
@@ -32,17 +33,27 @@ async function capTest(headersFor) {
     check('join while game in progress -> err code "joinfail"', lm.some((m) => m.t === 'err' && m.code === 'joinfail' && /in progress/.test(m.msg)), lm.filter((m) => m.t === 'err'));
     const nr = await client(URL_, 'nr'); const nm = raw(nr); nr.send({ t: 'join', code: 'QQQQ' }); await sleep(300);
     check('join unknown room -> err code "noroom"', nm.some((m) => m.t === 'err' && m.code === 'noroom'));
-    // --- queued sale over the wire ---
-    a.send({ t: 'build', type: 'arrow', c: 1, r: 6 }); await sleep(300);
+    // --- queued sale over the wire (v0.5.1: route-changing sale -> SELL_HARD_CAP) ---
+    // A single arrow ON the straight spawn->base route (column 5) changes the route, so while the board is busy its sale
+    // must wait the full SELL_HARD_CAP (20 s), not SELL_MAX_WAIT (10 s). With FORGE_TEST_HOOKS=1 the enemy floods brutes
+    // so the board stays busy past 20 s; without hooks the board may clear first, which is also a valid early sale.
+    a.send({ t: 'build', type: 'arrow', c: 5, r: 6 }); await sleep(300);
     check('state carries board busy flag', a.state.boards.L.busy === 0 || a.state.boards.L.busy === 1, a.state.boards.L.busy);
+    const g0 = b2.me() && b2.me().gold; b2.send({ t: 'debug_gold' }); await sleep(300);
+    const hooks = b2.me() && b2.me().gold > (g0 || 0) + 1000;
     const t0 = Date.now(); while (Date.now() - t0 < 25000 && !(a.state.boards.L.busy && a.state.boards.L.creeps.length)) await sleep(100);
-    a.send({ t: 'sell', c: 1, r: 6 }); await sleep(300);
-    const tw = a.state.boards.L.towers.find((t) => t[1] === 1 && t[2] === 6);
+    let sends = 0; const flood = setInterval(() => { if (hooks && sends < 40) { b2.send({ t: 'send', kind: 'brute' }); sends++; } }, 250);
+    await sleep(hooks ? 1500 : 0);
+    a.send({ t: 'sell', c: 5, r: 6 }); await sleep(300);
+    const tw = a.state.boards.L.towers.find((t) => t[1] === 5 && t[2] === 6);
     check('sell while creeps on board -> tower stays, flagged sale-queued', tw && tw[6] === 1, tw);
-    const t1 = Date.now(); while (Date.now() - t1 < 60000 && a.state.boards.L.towers.some((t) => t[1] === 1 && t[2] === 6)) await sleep(200);
-    const gone = !a.state.boards.L.towers.some((t) => t[1] === 1 && t[2] === 6);
+    const t1 = Date.now(); let busyAtSale = null;
+    while (Date.now() - t1 < 40000 && a.state.boards.L.towers.some((t) => t[1] === 5 && t[2] === 6)) { busyAtSale = a.state.boards.L.busy; await sleep(100); }
+    clearInterval(flood);
+    const gone = !a.state.boards.L.towers.some((t) => t[1] === 5 && t[2] === 6);
     const waited = (Date.now() - t1) / 1000 + 0.3;
-    check('queued sale executes when the board is clear, or after the ~10 s max wait (v0.4)', gone && (a.state.boards.L.creeps.length === 0 || waited >= S.SELL_MAX_WAIT - 0.5), { creeps: a.state.boards.L.creeps.length, busy: a.state.boards.L.busy, waited: +waited.toFixed(1) });
+    if (hooks) check(`route-changing queued sale on a busy board executes at the ${S.SELL_HARD_CAP} s hard cap (v0.5)`, gone && busyAtSale === 1 && waited >= S.SELL_HARD_CAP - 0.6 && waited <= S.SELL_HARD_CAP + 2, { waited: +waited.toFixed(1), busyAtSale, sends });
+    else check(`route-changing queued sale executes when the board clears, never before the ${S.SELL_HARD_CAP} s hard cap while busy (no hooks)`, gone && (busyAtSale === 0 || waited >= S.SELL_HARD_CAP - 0.6), { waited: +waited.toFixed(1), busyAtSale });
     [a, b2, late, nr].forEach((c) => c.ws.close());
     await sleep(300);
     // --- per-IP cap ignores proxy headers without TRUST_PROXY ---

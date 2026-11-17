@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.1 — 2026-11-16
+
+Core balance from the v0.5 QA review (QA fix A+B for 2v2 heavy senders). No client or protocol changes.
+
+- **2v2 send income ×0.75** (`SEND_TEAM2_INCOME`): heavy 2v2 senders reached about 100 income against 18 and won late
+  on economy alone.
+- **2v2 send bounty scales with the send's 2v2 HP multiplier** (`SEND_TEAM2_BOUNTY`, ×1.5 early rising to ×2.99 at
+  wave 16): defenders were earning about a third of the gold per HP that they earn in 1v1.
+- 1v1 is unchanged: every 1v1 row in `test/tune51.js` gives identical results before and after.
+- Results (5 seeds, `node test/tune51.js`):
+  - 2v2 "U swarm60" now loses everywhere: 0/5 vs D+Da, vs Dx2 and vs E20x2, from either side (was 5/5 vs D).
+  - 2v2 "U runner60" still beats pure defense 5/5 (12.3–13.3 min, was 10.7–11.8) and U20x2 5/5, but now loses 3/5
+    to E20x2. 2v2 E40 vs E20 evens out to 2/3 (was 5/0).
+  - No sender win under 8 min in `test/matrix.js`. 2v2 E40 still beats pure defense at 12.8–14.8 min.
+  - The eco bot that spends 20% on tiers still never beats defense.
+- **Tested, not adopted:** T3 Runner speed ×1.35 → ×1.2. U runner60 still beats pure D and U20x2 5/5; games are
+  only about 0.5 min longer.
+- `test/v03.js`: the queued-sale check is now a 20 s hard-cap test. It sells a tower on the route while the board is
+  busy (with `FORGE_TEST_HOOKS=1` the enemy floods brutes to keep it busy) and expects the sale at `SELL_HARD_CAP`.
+- New `test/tune51.js` (QA's tune5c rows plus side-swapped, eco, burst and 1v1 checks). New `test/sim.js` checks
+  cover the 1v1 vs 2v2 send income and bounty.
+
 ## 0.5.0 — 2026-11-16
 
 Core fixes from the v0.4 QA review: trickle-proof tower sales, upgrade economy, a leaner wire format, and small server fixes.

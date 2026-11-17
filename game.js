@@ -107,14 +107,15 @@ function doSend(room, p, kind) {
   const b = g.boards[other(p.team)];
   if ((b.sendAt || 0) - g.time > S.LANE_MAX_AHEAD) return `Lane full: the enemy send lane is booked more than ${S.LANE_MAX_AHEAD}s ahead, wait a moment`;
   addGold(p, -spec.cost); p.sent++; // no per-wave cap: sends are limited only by gold
-  sendIncomeGain(p, spec.income);
+  sendIncomeGain(p, spec.income * S.sendIncomeMult(g.teamSize)); // 2v2: x SEND_TEAM2_INCOME
   const hp = S.sendHp(kind, g.wave, g.teamSize, tier); // sudden-death multipliers are applied at spawn time
+  const bounty = Math.round(spec.bounty * S.sendBountyMult(g.teamSize, g.wave)); // 2v2: bounty scales with the HP multiplier
   // Send lane: sends are unlimited, but each board has one entry lane and every send occupies it for spec.lane
   // seconds, so a big banked dump trickles in over time instead of arriving all at once.
   const start = Math.max(g.time, b.sendAt || 0);
   b.sendAt = start + base.lane * S.SEND_LANE_MULT;
   for (let i = 0; i < spec.count; i++) {
-    b.queue.push({ at: start + i * base.gap, kind, v: tier, hp, speed: spec.speed, bounty: spec.bounty, leak: base.leak, radius: base.radius,
+    b.queue.push({ at: start + i * base.gap, kind, v: tier, hp, speed: spec.speed, bounty, leak: base.leak, radius: base.radius,
       arrowMult: spec.arrowMult, slowResist: spec.slowResist, from: p.id });
   }
   g.events.push({ k: 'send', team: p.team, kind, tier, name: p.name, id: p.id, n: p.sent });

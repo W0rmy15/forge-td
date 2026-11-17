@@ -2,7 +2,7 @@
 // ALL tuning numbers live here.
 (function (root) {
   const S = {
-    VERSION: '0.5.0',
+    VERSION: '0.5.1',
     COLS: 11, ROWS: 20,
     SPAWN: { c: 5, r: 0 }, BASE: { c: 5, r: 19 },
     // economy
@@ -39,6 +39,10 @@
     // the game is under way, but only x1.5 until wave FROM, rising linearly to full at wave FULL. Two attackers' sends land
     // on one shared maze; the slow start keeps 2v2 bank-and-dump rushes (bots won at ~4.3 min with the full value) in check.
     SEND_TEAM2_BONUS: 1.3, SEND_TEAM2: { START: 1.5, FROM: 6, FULL: 16 },
+    // v0.5.1 (QA v0.5 review, fix A+B): in 2v2 a send's income gain is x SEND_TEAM2_INCOME, and its defender bounty is
+    // multiplied by the same 2v2 multiplier as its HP (when SEND_TEAM2_BOUNTY), so defenders earn the same gold per HP as in 1v1
+    // (they were earning about a third). Without this, 2v2 heavy senders out-scaled everyone on income.
+    SEND_TEAM2_INCOME: 0.75, SEND_TEAM2_BOUNTY: true,
     // server protection: a send is refused when the target lane is already booked more than this many seconds ahead
     // (this is not a per-wave cap; with gold and patience you can still send as much as you like)
     LANE_MAX_AHEAD: 45,
@@ -105,6 +109,9 @@
     const k = Math.min(1, Math.max(0, (w - T.FROM) / Math.max(1, T.FULL - T.FROM)));
     return T.START + (full - T.START) * k;
   };
+  // income / bounty multipliers for a send in a game of this team size at this wave (1 in 1v1)
+  S.sendIncomeMult = function (teamSize) { return (teamSize || 1) >= 2 ? S.SEND_TEAM2_INCOME : 1; };
+  S.sendBountyMult = function (teamSize, wave) { return S.SEND_TEAM2_BOUNTY ? S.sendTeamMult(teamSize, wave) : 1; };
   S.sendRampFullWave = function () { return Math.ceil((1 - S.SEND_RAMP.START) / S.SEND_RAMP.PER_WAVE - 1e-9); };
   S.sendHp = function (kind, wave, teamSize, tier) {
     const n = teamSize || 1;
