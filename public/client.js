@@ -175,10 +175,18 @@
     $('buildBtns').appendChild(b); buildBtns[k] = b;
   }
   const rampFull = S.sendRampFullWave();
-  function sendTitle(k, tier) {
+  // Match game.js teamSizeOf: max of the two sides' player counts (1v1 or 2v2).
+  function teamSizeOf(s) {
+    if (!s || !s.players) return 1;
+    let l = 0, r = 0;
+    for (const p of s.players) { if (p.team === 'L') l++; else if (p.team === 'R') r++; }
+    return Math.max(1, l, r);
+  }
+  function sendTitle(k, tier, teamSize, wave) {
     const t = S.SENDS[k], sp = S.sendSpec(k, tier);
+    const bounty = Math.round(sp.bounty * S.sendBountyMult(teamSize, wave));
     return `${t.desc}: ${sp.count}× ${Math.round(t.hpMult * S.tierHp(k, tier) * 100)}% of a wave creep's HP (more in 2v2; weaker early, full strength from wave ${rampFull}). ` +
-      `Kill bounty ${sp.bounty}g for the defender. Income gain shrinks as your send income grows.` + (tier ? ` Tier ${tier}: ${S.SEND_TRAITS[k].desc[tier]}.` : '');
+      `Kill bounty ${bounty}g for the defender. Income gain shrinks as your send income grows.` + (tier ? ` Tier ${tier}: ${S.SEND_TRAITS[k].desc[tier]}.` : '');
   }
   for (const [k, t] of Object.entries(S.SENDS)) {
     const col = document.createElement('div'); col.className = 'scol';
@@ -195,13 +203,15 @@
     const full = !!(enemyB && enemyB.laneFull);
     const lane = (enemyB && enemyB.lane) || 0;
     const wait = Math.max(0, Math.ceil(lane - (S.LANE_MAX_AHEAD || 45)));
-    const sig = JSON.stringify([tiers, m.gold, wave, full, wait]);
+    const teamSize = teamSizeOf(state);
+    const sig = JSON.stringify([tiers, m.gold, wave, full, wait, teamSize]);
     if (sig === sendSig) return; sendSig = sig;
     for (const [k, t] of Object.entries(S.SENDS)) {
       const tier = tiers[k] || 0, sp = S.sendSpec(k, tier), up = S.sendUpCost(k, tier), unlock = up !== null ? S.SEND_UP.UNLOCK_WAVE[tier + 1] : 0;
-      const html = `<img src="${creepIcon(k, tier)}" alt=""><span class="nm"><span class="k">${t.key.toUpperCase()}</span> ${t.name}</span><span class="cost">${sp.cost}g <small>+${Math.round(sp.income * 10) / 10}</small></span>${pips(tier)}`;
+      const inc = Math.round(sp.income * S.sendIncomeMult(teamSize) * 10) / 10;
+      const html = `<img src="${creepIcon(k, tier)}" alt=""><span class="nm"><span class="k">${t.key.toUpperCase()}</span> ${t.name}</span><span class="cost">${sp.cost}g <small>+${inc}</small></span>${pips(tier)}`;
       if (sendBtns[k].dataset.html !== html) { sendBtns[k].innerHTML = html; sendBtns[k].dataset.html = html; }
-      sendBtns[k].title = sendTitle(k, tier) + (full ? ` Lane full — wait ${wait || 1}s.` : '');
+      sendBtns[k].title = sendTitle(k, tier, teamSize, wave) + (full ? ` Lane full — wait ${wait || 1}s.` : '');
       sendBtns[k].disabled = m.gold < sp.cost;
       sendBtns[k].classList.toggle('lanefull', full);
       const col = sendBtns[k].parentNode;
@@ -601,8 +611,8 @@
       } else if (p.t === 'pop') {
         const r = p.s * (0.35 + 1.05 * k);
         ctx.globalAlpha = 1 - k * k;
-        ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.32, 0, 6.283); ctx.fillStyle = '#fff'; ctx.fill();
-        AR.star(ctx, p.x, p.y, r, 8, 0.42); ctx.fillStyle = p.col; ctx.fill(); ctx.lineWidth = 2.2; ctx.strokeStyle = AR.OUT; ctx.stroke();
+        ctx.beginPath(); ctx.arc(p.x, p.y, r * (lowDetail ? 0.55 : 0.32), 0, 6.283); ctx.fillStyle = lowDetail ? p.col : '#fff'; ctx.fill();
+        if (!lowDetail) { AR.star(ctx, p.x, p.y, r, 8, 0.42); ctx.fillStyle = p.col; ctx.fill(); ctx.lineWidth = 2.2; ctx.strokeStyle = AR.OUT; ctx.stroke(); }
         ctx.globalAlpha = 1;
       } else if (p.t === 'ring') {
         ctx.globalAlpha = (1 - k) * 0.9; ctx.strokeStyle = `rgba(${p.col},1)`; ctx.lineWidth = 3.5 * (1 - k) + 1;
@@ -612,11 +622,17 @@
         if (lowDetail) continue;
         ctx.fillStyle = `rgba(${p.col},${0.75 * (1 - k)})`; ctx.beginPath(); ctx.arc(p.x, p.y + p.vy * age, p.s * (0.6 + k), 0, 6.283); ctx.fill();
       } else if (p.t === 'flake') {
+        if (lowDetail) continue;
         ctx.globalAlpha = 1 - k; ctx.fillStyle = '#ffffff'; AR.star(ctx, p.x + p.vx * age, p.y + p.vy * age, p.s, 6, 0.4); ctx.fill(); ctx.globalAlpha = 1;
       } else if (p.t === 'muzzle') {
-        ctx.globalAlpha = 1 - k; AR.star(ctx, p.x, p.y, 7 * (1 - k * 0.5), 7, 0.45);
-        ctx.fillStyle = p.txt === 'frost' ? '#c8f0ff' : '#ffe14a'; ctx.fill();
-        ctx.lineWidth = 1.5; ctx.strokeStyle = p.txt === 'frost' ? '#7fe0ff' : '#ff8a1f'; ctx.stroke(); ctx.globalAlpha = 1;
+        if (lowDetail) {
+          ctx.globalAlpha = 1 - k; ctx.fillStyle = p.txt === 'frost' ? '#c8f0ff' : '#ffe14a';
+          ctx.beginPath(); ctx.arc(p.x, p.y, 4 * (1 - k * 0.5), 0, 6.283); ctx.fill(); ctx.globalAlpha = 1;
+        } else {
+          ctx.globalAlpha = 1 - k; AR.star(ctx, p.x, p.y, 7 * (1 - k * 0.5), 7, 0.45);
+          ctx.fillStyle = p.txt === 'frost' ? '#c8f0ff' : '#ffe14a'; ctx.fill();
+          ctx.lineWidth = 1.5; ctx.strokeStyle = p.txt === 'frost' ? '#7fe0ff' : '#ff8a1f'; ctx.stroke(); ctx.globalAlpha = 1;
+        }
       } else if (p.t === 'text') {
         const y = p.y - 26 * k, sc = k < 0.15 ? 0.6 + k * 2.7 : 1;
         ctx.globalAlpha = k > 0.7 ? (1 - k) / 0.3 : 1; ctx.font = `700 ${Math.round(p.s * sc)}px ${FONT}`; ctx.textAlign = 'center';
@@ -676,7 +692,7 @@
   function buildPrev() { for (const b of ['L', 'R']) { const m = prevMaps[b]; m.clear(); if (prevState) for (const c of prevState.boards[b].creeps) m.set(c[0], c); } }
   let bgGrad = null, frameStats = { n: 0, total: 0, max: 0 };
   // Low-detail mode on crowded boards: no creep shadows, no translucent ring/puff fills, fewer kill chips.
-  const LOW_ON = 220, LOW_OFF = 180; let lowDetail = false;
+  const LOW_ON = 80, LOW_OFF = 55; let lowDetail = false;
   window.__ftdLowDetail = () => lowDetail; // read-only hook (tests)
   let leakCv = null;
   function leakGlow() {
@@ -763,7 +779,7 @@
             const sp = AR.creep(kind, cr[8], R), w = sp.w * sq * hitSq, h = sp.h / sq / hitSq;
             ctx.drawImage(sp.c, px - w / 2, py - lift - h / 2 + (sp.h - h) * 0.3, w, h);
             if (hitK) { const f = AR.creepFlash(R); ctx.globalAlpha = 0.85 * hitK; ctx.drawImage(f.c, px - f.w * hitSq / 2, py - lift - f.h / 2, f.w * hitSq, f.h); ctx.globalAlpha = 1; }
-            if (cr[6] && !lowDetail) { const ic = AR.creepIce(R); ctx.drawImage(ic.c, px - ic.w / 2, py - lift - ic.h / 2, ic.w, ic.h); }
+            if (cr[6]) { const ic = lowDetail ? AR.creepIceLite(R) : AR.creepIce(R); ctx.drawImage(ic.c, px - ic.w / 2, py - lift - ic.h / 2, ic.w, ic.h); }
           }
         }
         // pass 2: one shared HP bar per stack, only on damaged creeps.
