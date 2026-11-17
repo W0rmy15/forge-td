@@ -10,6 +10,7 @@
   let rosterSig = '', sellArm = null; // sellArm: {c,r,until} for two-step sell
   let state = null, prevState = null, stateAt = 0;
   let buildType = null, selected = null, hover = null; // hover: {b,c,r,fx,fy}
+  let overPainted = '';
 
   // ---------- menu ----------
   $('name').value = localStorage.getItem('ftd_name') || '';
@@ -102,7 +103,7 @@
 
   function renderLobby() {
     if (lobby.phase === 'lobby') {
-      show('lobby'); $('over').classList.add('hidden'); state = null; selected = null; buildType = null;
+      show('lobby'); $('over').className = 'overlay hidden'; overPainted = ''; state = null; selected = null; buildType = null;
       $('lobbyCode').textContent = lobby.code;
       $('shareLink').value = `${location.origin}${location.pathname}?room=${lobby.code}`;
       for (const t of ['L', 'R']) {
@@ -121,7 +122,7 @@
       $('lobbyErr').textContent = canStart || !isHost ? '' : nL !== nR || !nL ? `Teams must be even and non-empty (now ${nL}v${nR}).` : 'Waiting for everyone to be ready.';
     } else {
       show('game');
-      rosterSig = ''; sendSig = '';
+      rosterSig = ''; sendSig = ''; twSeen = false; TWR.clear();
       const isHost = lobby.hostId === you;
       $('backBtn').classList.toggle('hidden', !isHost);
       $('overWait').classList.toggle('hidden', isHost);
@@ -131,8 +132,8 @@
   // ---------- game UI ----------
   const buildBtns = {}, sendBtns = {}, upBtns = {};
   const AIcon = window.ART, iconCache = {};
-  const towerIcon = (k) => iconCache['t' + k] || (iconCache['t' + k] = AIcon.iconURL(AIcon.tower(k, 0), 26));
-  const creepIcon = (k, tier) => iconCache['c' + k + tier] || (iconCache['c' + k + tier] = AIcon.iconURL(AIcon.creep(k, tier, k === 'swarm' ? 7 : k === 'brute' ? 9.5 : 8), 26));
+  const towerIcon = (k) => iconCache['t' + k] || (iconCache['t' + k] = AIcon.iconURL(AIcon.tower(k, 0), 36, 1.22));
+  const creepIcon = (k, tier) => iconCache['c' + k + tier] || (iconCache['c' + k + tier] = AIcon.iconURL(AIcon.creep(k, tier, k === 'swarm' ? 7 : k === 'brute' ? 9.5 : 8), 36, 1.18));
   const pips = (t) => '<span class="pips">' + [1, 2, 3].map((i) => `<i class="${i <= t ? 'on' : ''}"></i>`).join('') + '</span>';
   for (const [k, t] of Object.entries(S.TOWERS)) {
     const b = document.createElement('button');
@@ -223,11 +224,22 @@
       else if (e.k === 'send' && e.team !== m.team) enemySendToast(e);
     }
     if (s.phase === 'over' || s.winner) {
-      $('over').classList.remove('hidden');
+      const kind = s.winner === 'draw' ? 'draw' : s.winner === m.team ? 'win' : 'lose';
+      $('over').className = 'overlay ' + kind;
       $('overText').textContent = s.winner === 'draw' ? 'Draw!' : s.winner === m.team ? '🏆 Victory!' : '💀 Defeat';
       $('overReason').textContent = s.winReason || '';
-      $('overStats').innerHTML = s.players.map((p) => `<div><span class="dot" style="background:${p.color}"></span>${esc(p.name)} (${p.team}) — kills ${p.kills}, sent ${p.sent}, income ${p.income}</div>`).join('');
-    } else $('over').classList.add('hidden');
+      $('overStats').innerHTML = s.players.map((p) => `<div class="ostat"><span class="dot" style="background:${p.color}"></span><b>${esc(p.name)}</b> <em>${p.team === 'L' ? 'Left' : 'Right'}</em><span class="os">⚔ ${p.kills}</span><span class="os">➤ ${p.sent}</span><span class="os">+${p.income}g</span></div>`).join('');
+      if (overPainted !== kind) {
+        overPainted = kind;
+        const oc = $('overArt');
+        if (oc && window.ART) {
+          const md = Math.min(2, window.devicePixelRatio || 1), W = 420, H = 130;
+          oc.width = W * md; oc.height = H * md;
+          const og = oc.getContext('2d'); og.setTransform(md, 0, 0, md, 0, 0);
+          window.ART.paintOver(og, W, H, kind);
+        }
+      }
+    } else { $('over').className = 'overlay hidden'; overPainted = ''; }
   }
 
   // enemy sends are tallied into one toast while it is queued or showing, so they never push other toasts out
@@ -438,7 +450,8 @@
     return null; // pool full: drop the effect
   }
   const CHILL = new Map();
-  const TWR = new Map(); // tower anim state by numeric key: { ang, kick }
+  const TWR = new Map(); // tower anim state by numeric key: { id, ang, kick, born, upLvl, upAt }
+  let twSeen = false;
   const twKey = (b, c, r) => (b === 'L' ? 0 : 10000) + r * 100 + c;
   function bx(b, x) { return BX[b] + x * CELL; } function by(y) { return TOP + y * CELL; }
   function fxEvent(e) {
@@ -483,7 +496,7 @@
           for (let j = 1; j <= 3; j++) { const kk = Math.max(0, k - j * 0.08); ctx.globalAlpha = 0.35 - j * 0.09; ctx.fillStyle = '#eeeeee'; ctx.beginPath(); ctx.arc(p.x + (p.x2 - p.x) * kk, p.y + (p.y2 - p.y) * kk - Math.sin(kk * Math.PI) * 9, 3 + j, 0, 6.283); ctx.fill(); }
           ctx.globalAlpha = 1; ctx.drawImage(sp.c, x - sp.w * sc / 2, y - lift - sp.h * sc / 2, sp.w * sc, sp.h * sc);
         } else {
-          const sp = p.txt === 'frost' ? AR.shard() : AR.dart(false), tx = p.x + (p.x2 - p.x) * Math.max(0, k - 0.35), ty = p.y + (p.y2 - p.y) * Math.max(0, k - 0.35);
+          const sp = p.txt === 'frost' ? AR.shard() : AR.dart(false), tx = p.x + (p.x2 - p.x) * Math.max(0, k - 0.22), ty = p.y + (p.y2 - p.y) * Math.max(0, k - 0.22);
           ctx.strokeStyle = p.txt === 'frost' ? 'rgba(170,235,255,0.75)' : 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(x, y); ctx.stroke();
           ctx.save(); ctx.translate(x, y); ctx.rotate(p.rot); ctx.drawImage(sp.c, -sp.w / 2, -sp.h / 2, sp.w, sp.h); ctx.restore();
         }
@@ -491,8 +504,11 @@
         const x = p.x + p.vx * age, y = p.y + p.vy * age + 0.00012 * age * age;
         ctx.globalAlpha = 1 - k; ctx.fillStyle = p.col; ctx.save(); ctx.translate(x, y); ctx.rotate(p.vr * age); ctx.fillRect(-p.s, -p.s * 0.6, p.s * 2, p.s * 1.2); ctx.restore(); ctx.globalAlpha = 1;
       } else if (p.t === 'pop') {
-        const r = p.s * (0.5 + 0.7 * k);
-        ctx.globalAlpha = 1 - k; AR.star(ctx, p.x, p.y, r, 8, 0.55); ctx.fillStyle = p.col; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = AR.OUT; ctx.stroke(); ctx.globalAlpha = 1;
+        const r = p.s * (0.35 + 1.05 * k);
+        ctx.globalAlpha = 1 - k * k;
+        ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.32, 0, 6.283); ctx.fillStyle = '#fff'; ctx.fill();
+        AR.star(ctx, p.x, p.y, r, 8, 0.42); ctx.fillStyle = p.col; ctx.fill(); ctx.lineWidth = 2.2; ctx.strokeStyle = AR.OUT; ctx.stroke();
+        ctx.globalAlpha = 1;
       } else if (p.t === 'ring') {
         ctx.globalAlpha = (1 - k) * 0.9; ctx.strokeStyle = `rgba(${p.col},1)`; ctx.lineWidth = 3.5 * (1 - k) + 1;
         ctx.beginPath(); ctx.arc(p.x, p.y, p.s * (0.35 + 0.75 * k), 0, 6.283); ctx.stroke();
@@ -521,14 +537,24 @@
     ctx.setLineDash(DASH); ctx.lineDashOffset = -performance.now() / 60;
     ctx.strokeStyle = ok ? 'rgba(255,255,255,0.95)' : 'rgba(255,70,70,0.95)'; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash(NODASH);
   }
-  function drawTowerSprite(x, y, type, lvl, ang, kick, alpha, now) {
+  function drawTowerSprite(x, y, type, lvl, ang, kick, alpha, now, born, upAt) {
     const sp = AR.tower(type, lvl);
     const kt = now - kick, recoil = kt < 140 ? (1 - kt / 140) * 3.5 : 0;
-    const sq = type === 'frost' && kt < 180 ? 1 + Math.sin((kt / 180) * Math.PI) * 0.12 : 1;
+    let sq = type === 'frost' && kt < 180 ? 1 + Math.sin((kt / 180) * Math.PI) * 0.12 : 1;
+    if (born && now - born < 320) {
+      const t = (now - born) / 320;
+      sq *= t < 0.55 ? (t / 0.55) * 1.16 : 1 + Math.sin((1 - t) * Math.PI) * 0.1;
+    }
+    if (upAt && now - upAt < 280) {
+      const t = (now - upAt) / 280;
+      sq *= 1 + Math.sin(t * Math.PI) * 0.18;
+      ctx.globalAlpha = (1 - t) * 0.9; ctx.strokeStyle = '#ffd23a'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(x, y, CELL * (0.35 + t * 0.7), 0, 6.283); ctx.stroke(); ctx.globalAlpha = 1;
+    }
     ctx.globalAlpha = alpha;
-    if (AR.rotates(type)) { ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.drawImage(sp.c, -sp.w / 2, -sp.h / 2 + recoil, sp.w, sp.h); ctx.restore(); }
+    if (AR.rotates(type)) { ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.drawImage(sp.c, -sp.w * sq / 2, -sp.h * sq / 2 + recoil, sp.w * sq, sp.h * sq); ctx.restore(); }
     else {
-      if (type === 'frost' && lvl === 2) { ctx.fillStyle = `rgba(140,225,255,${0.18 + 0.1 * Math.sin(now / 300)})`; ctx.beginPath(); ctx.arc(x, y, 15, 0, 6.283); ctx.fill(); }
+      if (type === 'frost' && lvl === 2) { ctx.fillStyle = `rgba(140,225,255,${0.1 + 0.06 * Math.sin(now / 300)})`; ctx.beginPath(); ctx.arc(x, y, 14, 0, 6.283); ctx.fill(); }
       ctx.drawImage(sp.c, x - (sp.w * sq) / 2, y - (sp.h / sq) / 2 - 2 + (sp.h - sp.h / sq) / 2, sp.w * sq, sp.h / sq);
     }
     ctx.globalAlpha = 1;
@@ -575,14 +601,33 @@
       // cached static board
       const bcv = ensureBoard(b, pmap);
       ctx.drawImage(bcv, x0 - PADX, TOP - PADX, BW + PADX * 2, BH + PADX * 2);
-      if (B.leak) { ctx.fillStyle = 'rgba(255,40,60,0.22)'; ctx.fillRect(x0, TOP, BW, BH); }
+      if (B.leak) {
+        const lx = x0 + (S.BASE.c + 0.5) * CELL, ly = TOP + (S.BASE.r + 0.5) * CELL;
+        const lg = ctx.createRadialGradient(lx, ly, 8, lx, ly, CELL * 5.5);
+        lg.addColorStop(0, 'rgba(255,40,60,0.42)'); lg.addColorStop(1, 'rgba(255,40,60,0)');
+        ctx.fillStyle = lg; ctx.fillRect(x0, TOP, BW, BH);
+      }
       // portal swirl
       { const px = x0 + (S.SPAWN.c + 0.5) * CELL, py = TOP + (S.SPAWN.r + 0.5) * CELL; ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2;
         for (let i = 0; i < 3; i++) { const a = now / 300 + i * 2.094; ctx.beginPath(); ctx.arc(px, py, 8, a, a + 1.3); ctx.stroke(); } }
-      // towers
+      // towers (scale-in on place, gold pulse on upgrade — skip the pop-in on the first frame so mid-join / screenshots stay calm)
       for (const t of B.towers) {
-        const a = TWR.get(twKey(b, t[1], t[2]));
-        drawTowerSprite(x0 + (t[1] + 0.5) * CELL, TOP + (t[2] + 0.5) * CELL, t[3], t[4], a ? a.ang : 0, a ? a.kick : -1e9, t[6] ? 0.55 : 1, now);
+        const k = twKey(b, t[1], t[2]);
+        let a = TWR.get(k);
+        if (!a || a.id !== t[0]) {
+          a = { id: t[0], ang: a ? a.ang : 0, kick: a ? a.kick : -1e9, born: twSeen ? now : 0, upLvl: t[4], upAt: -1e9 };
+          TWR.set(k, a);
+          if (twSeen) {
+            const tx = x0 + (t[1] + 0.5) * CELL, ty = TOP + (t[2] + 0.5) * CELL;
+            const pop = spawnP('pop', tx, ty, 280); if (pop) { pop.s = 12; pop.col = '#ffd23a'; }
+            const ring = spawnP('ring', tx, ty, 300); if (ring) { ring.s = CELL * 0.9; ring.col = '255,210,80'; }
+          }
+        } else if (t[4] > a.upLvl) {
+          a.upLvl = t[4]; a.upAt = now;
+          const tx = x0 + (t[1] + 0.5) * CELL, ty = TOP + (t[2] + 0.5) * CELL;
+          const pop = spawnP('pop', tx, ty, 260); if (pop) { pop.s = 11; pop.col = '#ffd23a'; }
+        }
+        drawTowerSprite(x0 + (t[1] + 0.5) * CELL, TOP + (t[2] + 0.5) * CELL, t[3], t[4], a.ang, a.kick, t[6] ? 0.55 : 1, now, a.born, a.upAt);
         if (t[6]) { const c = AR.coin(), bob = Math.sin(now / 200 + t[0]) * 1.5; ctx.drawImage(c.c, x0 + (t[1] + 1) * CELL - 12, TOP + t[2] * CELL - 3 + bob, c.w, c.h); } // sale queued
       }
       // selected
@@ -600,21 +645,25 @@
           const kind = cr[1], R = AR.creepR(kind, cr[7], CELL), px = x0 + cx * CELL, py = TOP + cy * CELL;
           if (pass === 0) { const sh = AR.shadow(R); ctx.drawImage(sh.c, px - sh.w / 2, py + R * 0.55 - sh.h / 2, sh.w, sh.h); continue; }
           const ph = now * (kind === 'runner' ? 0.02 : kind === 'brute' || kind === 'boss' ? 0.008 : 0.013) + cr[0] * 1.7;
-          const bounce = Math.abs(Math.sin(ph)), lift = bounce * R * 0.28, sq = 1 + (1 - bounce) * 0.1;
+          const bounce = Math.abs(Math.sin(ph)), lift = bounce * R * 0.34, sq = 1 + (1 - bounce) * 0.12;
           if (pass === 1) {
-            const sp = AR.creep(kind, cr[8], R), w = sp.w * sq, h = sp.h / sq;
+            const hs = hpSeen.get(cr[0]), hitK = hs && now - hs.hit < 140 ? 1 - (now - hs.hit) / 140 : 0;
+            const hitSq = 1 + hitK * 0.16;
+            const sp = AR.creep(kind, cr[8], R), w = sp.w * sq * hitSq, h = sp.h / sq / hitSq;
             ctx.drawImage(sp.c, px - w / 2, py - lift - h / 2 + (sp.h - h) * 0.3, w, h);
-            const hs = hpSeen.get(cr[0]);
-            if (hs && now - hs.hit < 90) { const f = AR.creepFlash(R); ctx.globalAlpha = 0.7 * (1 - (now - hs.hit) / 90); ctx.drawImage(f.c, px - f.w / 2, py - lift - f.h / 2, f.w, f.h); ctx.globalAlpha = 1; }
+            if (hitK) { const f = AR.creepFlash(R); ctx.globalAlpha = 0.85 * hitK; ctx.drawImage(f.c, px - f.w * hitSq / 2, py - lift - f.h / 2, f.w * hitSq, f.h); ctx.globalAlpha = 1; }
             if (cr[6]) { const ic = AR.creepIce(R); ctx.drawImage(ic.c, px - ic.w / 2, py - lift - ic.h / 2, ic.w, ic.h); }
           } else if (cr[4] < cr[5]) {
             const w = Math.max(16, R * 2.1), y = py - lift - R - 8, f = Math.max(0, cr[4] / cr[5]);
-            ctx.fillStyle = AR.OUT; ctx.fillRect(px - w / 2 - 1.5, y - 1.5, w + 3, 6);
-            ctx.fillStyle = '#5a1a2a'; ctx.fillRect(px - w / 2, y, w, 3);
-            ctx.fillStyle = f > 0.5 ? '#4ce06a' : f > 0.25 ? '#ffd23a' : '#ff4d4d'; ctx.fillRect(px - w / 2, y, w * f, 3);
+            ctx.fillStyle = AR.OUT; ctx.fillRect(px - w / 2 - 1.5, y - 1.5, w + 3, 7);
+            ctx.fillStyle = '#5a1a2a'; ctx.fillRect(px - w / 2, y, w, 4);
+            ctx.fillStyle = f > 0.5 ? '#4ce06a' : f > 0.25 ? '#ffd23a' : '#ff4d4d'; ctx.fillRect(px - w / 2, y, w * f, 4);
+            ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(px - w / 2, y, w * f, 1.2);
           }
         }
       }
+      // castle lives plaque (per-frame; not baked into the static board)
+      AR.drawCastleLives(ctx, x0 + (S.BASE.c + 0.5) * CELL, TOP + (S.BASE.r + 0.5) * CELL, CELL, B.lives, B.leak);
       // hover / ghost placement
       if (hover && hover.b === b && m) {
         const ht = towerAt(b, hover.c, hover.r), hx = x0 + (hover.c + 0.5) * CELL, hy = TOP + (hover.r + 0.5) * CELL;
@@ -636,6 +685,7 @@
       ctx.fillStyle = p.color; ctx.strokeStyle = AR.OUT; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 11, y + 5); ctx.lineTo(x + 5, y + 11); ctx.closePath(); ctx.fill(); ctx.stroke();
       headerText(p.name, x + 10, y + 21, p.color, 'left', 11);
     }
+    twSeen = true;
     const dt = performance.now() - t0; frameStats.n++; frameStats.total += dt; if (dt > frameStats.max) frameStats.max = dt;
   }
   setupCanvas();
@@ -650,7 +700,10 @@
     const bg = document.createElement('canvas'); bg.width = MW * md; bg.height = MH * md; const bgc = bg.getContext('2d'); bgc.scale(md, md);
     bgc.save(); AR.rrect(bgc, 2, 2, MW - 4, MH - 4, 22); bgc.clip(); AR.drawGrass(bgc, MW, MH, 30, 5);
     const pts = []; for (let x = -20; x <= MW + 20; x += 20) pts.push([x, 92 + Math.sin(x / 55) * 14]);
-    AR.drawPath(bgc, pts, 30); bgc.restore();
+    AR.drawPath(bgc, pts, 30);
+    AR.drawPortal(bgc, 28, 92 + Math.sin(-20 / 55) * 14, 30);
+    AR.drawCastle(bgc, MW - 36, 92 + Math.sin((MW + 20) / 55) * 14, 30, '#4fa3ff');
+    bgc.restore();
     AR.rrect(bgc, 2, 2, MW - 4, MH - 4, 22); bgc.lineWidth = 4; bgc.strokeStyle = AR.OUT; bgc.stroke();
     const towers = [['arrow', 2, 70, 40], ['cannon', 1, 200, 36], ['frost', 2, 330, 40], ['arrow', 0, 410, 132], ['cannon', 2, 120, 134]];
     for (const [, , x, y] of towers) { const pd = AR.pad('#4fa3ff', 0, 30); bgc.drawImage(pd.c, x - pd.w / 2, y - pd.h / 2, pd.w, pd.h); }

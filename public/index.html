@@ -11,6 +11,7 @@
 <body>
 <div id="sky"><div class="cloud c1"></div><div class="cloud c2"></div><div class="cloud c3"></div><div class="hills"></div></div>
 <div id="menu" class="screen">
+  <div class="decor" aria-hidden="true"><span class="bb b1"></span><span class="bb b2"></span><span class="bb b3"></span><span class="bb b4"></span><span class="bb b5"></span><span class="bb b6"></span></div>
   <h1 class="logo"><span class="l1">Forge</span><span class="l2">TD</span></h1>
   <p class="sub">Online versus tower defense · 1v1 or 2v2</p>
   <canvas id="menuArt" width="460" height="150"></canvas>
@@ -23,6 +24,7 @@
 </div>
 
 <div id="lobby" class="screen hidden">
+  <div class="decor" aria-hidden="true"><span class="bb b1"></span><span class="bb b2"></span><span class="bb b3"></span><span class="bb b4"></span><span class="bb b5"></span><span class="bb b6"></span></div>
   <h1 class="logo small"><span class="l1">Room</span> <span id="lobbyCode" class="l2"></span></h1>
   <div class="share card row">Invite link: <input id="shareLink" readonly onclick="this.select()"> <button id="copyBtn" class="blue">Copy</button></div>
   <div class="teams">
@@ -62,7 +64,7 @@
       <p class="hint">Keys: 1/2/3 tower · Q/W/E send · Shift+Q/W/E upgrade send · U upgrade tower · X twice to sell (queued while creeps are on your board) · Esc cancel</p>
     </div>
   </div>
-  <div id="over" class="overlay hidden"><div class="card"><h1 id="overText"></h1><p id="overReason" class="hint"></p><div id="overStats"></div><button id="backBtn" class="big go hidden">Back to lobby</button><p id="overWait" class="hint">Waiting for host…</p></div></div>
+  <div id="over" class="overlay hidden"><div class="card"><canvas id="overArt" width="420" height="130"></canvas><h1 id="overText"></h1><p id="overReason" class="hint"></p><div id="overStats"></div><button id="backBtn" class="big go hidden">Back to lobby</button><p id="overWait" class="hint">Waiting for host…</p></div></div>
 </div>
 <div id="toast"></div>
 <script src="shared.js"></script>

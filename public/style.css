@@ -39,7 +39,7 @@ p.hint.card{min-width:0;max-width:560px;padding:10px 14px;font-size:14px}
 .share{flex-direction:row;margin:10px 0 18px;padding:10px 14px;font-weight:600}
 .share input{width:320px;font-size:13px}
 .teams{display:flex;gap:18px;align-items:center}
-.vs{font-size:44px;font-weight:700;color:#ffd23a;-webkit-text-stroke:6px var(--out);paint-order:stroke fill;transform:rotate(-8deg)}
+.vs{font-size:44px;font-weight:700;color:#ffd23a;-webkit-text-stroke:6px var(--out);paint-order:stroke fill;transform:rotate(-8deg);animation:vsbob 2.4s ease-in-out infinite}
 .team{background:#fff8e6;border:4px solid var(--out);border-radius:20px;padding:14px 16px;min-width:250px;box-shadow:0 6px 0 var(--out)}
 .team.L{background:linear-gradient(#e3f3ff,#fff8e6)}.team.R{background:linear-gradient(#ffe6e3,#fff8e6)}
 .team h2{margin:0 0 8px;font-size:20px}
@@ -61,7 +61,7 @@ canvas#cv{border-radius:18px;cursor:crosshair;border:4px solid var(--out);box-sh
 .stat.small{font-size:12.5px;color:#6b5a3e}.stat.small b{font-size:13px!important}
 .btns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
 .btns button{padding:4px 2px 5px;font-size:12px;line-height:1.15;display:flex;flex-direction:column;align-items:center;gap:1px;border-radius:12px}
-.btns button img{width:30px;height:30px;filter:drop-shadow(0 2px 0 rgba(0,0,0,.2))}
+.btns button img{width:40px;height:40px;filter:drop-shadow(0 2px 0 rgba(0,0,0,.2))}
 .tbtn{background:linear-gradient(#fff,#ffe9b0)}
 .btns button.active{background:linear-gradient(#fff5c2,#ffcf33);outline:3px solid #ff8a1f;outline-offset:1px}
 .btns button .k{display:inline-block;background:var(--out);color:#ffd23a;border-radius:6px;padding:0 4px;font-size:11px}
@@ -99,3 +99,34 @@ button.danger{background:linear-gradient(#ff8b7a,#e8453c);color:#fff}
 .banner.fin{background:linear-gradient(#b48cff,#6b3fd1)}
 @keyframes pulse{50%{filter:brightness(1.15)}}
 .sel .queued{color:#b07800;font-weight:700}
+
+@keyframes vsbob{50%{transform:rotate(-8deg) scale(1.1)}}
+/* floating balloon decorations on menu + lobby */
+.decor{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+.screen{position:relative}
+.screen > :not(.decor){position:relative;z-index:1}
+.decor .bb{position:absolute;width:28px;height:34px;border-radius:50% 50% 50% 50%/45% 45% 55% 55%;border:3px solid var(--out);box-shadow:inset -5px -6px 0 rgba(0,0,0,.08),inset 4px 5px 0 rgba(255,255,255,.45);animation:bbfloat 16s linear infinite}
+.decor .bb:after{content:'';position:absolute;left:50%;top:100%;width:2px;height:14px;background:var(--out);transform:translateX(-50%)}
+.decor .bb:before{content:'';position:absolute;left:50%;top:100%;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid var(--out);transform:translate(-50%,-2px)}
+.decor .b1{background:#ff4d4d;left:6%;bottom:-40px;animation-duration:18s;animation-delay:-2s}
+.decor .b2{background:#3d9bff;left:18%;bottom:-40px;width:22px;height:26px;animation-duration:22s;animation-delay:-8s}
+.decor .b3{background:#ffd23f;right:8%;bottom:-40px;width:32px;height:38px;animation-duration:20s;animation-delay:-5s}
+.decor .b4{background:#9d6bff;right:20%;bottom:-40px;width:20px;height:24px;animation-duration:15s;animation-delay:-11s}
+.decor .b5{background:#3fd16a;left:40%;bottom:-40px;width:24px;height:30px;animation-duration:24s;animation-delay:-1s}
+.decor .b6{background:#ff6fd0;right:36%;bottom:-40px;width:18px;height:22px;animation-duration:17s;animation-delay:-13s}
+@keyframes bbfloat{0%{transform:translateY(0) rotate(-6deg)}50%{transform:translateY(-55vh) rotate(8deg)}100%{transform:translateY(-110vh) rotate(-4deg);opacity:0}}
+/* game-over */
+#overArt{width:420px;height:130px;margin:0 0 6px;display:block}
+.overlay .card{min-width:420px;padding:22px 24px 20px}
+#over.win .card{background:linear-gradient(#fffdf0,#e7ffd6)}
+#over.lose .card{background:linear-gradient(#fff4f0,#ffd8d0)}
+#over.draw .card{background:linear-gradient(#fff8e6,#e8eeff)}
+#over.win #overText{color:#7ee35b}
+#over.lose #overText{color:#ff5a4f}
+#over.draw #overText{color:#6cc6ff}
+#overReason{max-width:440px}
+#overStats{display:flex;flex-direction:column;gap:6px;width:100%;margin:8px 0 12px;text-align:left}
+#overStats .ostat{display:flex;align-items:center;gap:6px;background:#fff;border:2.5px solid var(--out);border-radius:12px;padding:6px 10px;font-weight:600;flex-wrap:wrap}
+#overStats .ostat em{font-style:normal;color:#6b5a3e;font-size:12px;margin-right:auto}
+#overStats .ostat .os{background:#fff8e6;border:2px solid var(--out);border-radius:8px;padding:1px 6px;font-size:12px}
+#panel{max-height:calc(100vh - 28px);overflow-y:auto}
