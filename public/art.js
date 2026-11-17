@@ -212,7 +212,9 @@
     const arr = KIND[kind] || BALLOON;
     return arr[Math.max(0, Math.min(arr.length - 1, (v || 1) - 1))];
   };
-  A.creepR = function (kind, r, cell) { return Math.max(kind === 'swarm' ? 7 : 5.5, r * cell * (kind === 'swarm' ? 1.7 : kind === 'boss' ? 1.25 : 1.4)); };
+  // Guard against bad wire data (e.g. a string radius): never let NaN reach a gradient or canvas size.
+  function finR(R) { R = +R; return R > 0 && R < 1e4 ? R : 8; }
+  A.creepR = function (kind, r, cell) { const v = (+r) * (+cell) * (kind === 'swarm' ? 1.7 : kind === 'boss' ? 1.25 : 1.4); return Math.max(kind === 'swarm' ? 7 : 5.5, v === v && v < 1e4 ? v : 0); };
 
   function tierRing(g, R, tier) {
     if (!tier) return;
@@ -368,12 +370,14 @@
   }
 
   A.creep = function (kind, v, R) {
+    R = finR(R);
     const Rq = Math.round(R * 2) / 2, vk = kind === 'neutral' ? ((v || 1) - 1) % BALLOON.length : kind === 'boss' ? 0 : Math.min(3, v || 0);
     // Tight canvas: T3 ring spikes reach ~R+8; keep a 2 px pad. Smaller than 5.2R+16 to cut overdraw.
     const size = Math.ceil(Math.max(Rq * 3.8 + 8, (Rq + 8) * 2 + 4));
     return sprite(`cr|${kind}|${vk}|${Rq}`, size, size, (g) => drawCreep(g, kind, kind === 'neutral' ? vk + 1 : vk, Rq));
   };
   A.creepFlash = function (R) {
+    R = finR(R);
     const Rq = Math.round(R * 2) / 2, size = Math.ceil(Rq * 2.8 + 6);
     return sprite(`cf|${Rq}`, size, size, (g) => {
       g.beginPath(); g.arc(0, 0, Rq * 1.05, 0, 7);
@@ -385,6 +389,7 @@
     });
   };
   A.creepIce = function (R) {
+    R = finR(R);
     const Rq = Math.round(R * 2) / 2, size = Math.ceil(Rq * 2.6 + 8);
     return sprite(`ci|${Rq}`, size, size, (g) => {
       // Tight crystal rim — avoid a large translucent fill (overdraw on crowded boards)
@@ -403,6 +408,7 @@
   };
   // Tight cyan ring for low-detail mode (no big translucent fill)
   A.creepIceLite = function (R) {
+    R = finR(R);
     const Rq = Math.round(R * 2) / 2, size = Math.ceil(Rq * 2.2 + 4);
     return sprite(`cil|${Rq}`, size, size, (g) => {
       g.strokeStyle = 'rgba(140,230,255,0.95)';
@@ -411,6 +417,7 @@
     });
   };
   A.shadow = function (R) {
+    R = finR(R);
     const Rq = Math.round(R * 2) / 2, w = Rq * 2.4, h = Rq * 1.1;
     return sprite(`sh|${Rq}`, w, h, (g) => {
       // Simple ellipse, no shadowBlur (that only bloated the baked bitmap)

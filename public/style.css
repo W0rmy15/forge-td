@@ -176,7 +176,7 @@ button.danger{background:linear-gradient(#c45830,#8a2818);color:#fff}
 
 /* sound controls — compact hammered-metal, matches the side panel */
 #audCtrl{align-items:stretch;gap:2px;margin:0;min-height:0;min-width:0;max-width:100%;padding:0 8px 0 2px;box-sizing:border-box;overflow:hidden}
-#muteBtn{padding:0 6px;min-width:28px;height:22px;font-size:13px;line-height:20px;border-radius:6px;border-width:2px;box-shadow:0 1px 0 var(--out)}
+#muteBtn{padding:0 6px;min-width:28px;height:22px;font-size:15px;line-height:20px;color:#fff;background:linear-gradient(#34557a,#1c3150);text-shadow:0 1px 0 #0b1a2e,0 0 2px #0b1a2e;border-radius:6px;border-width:2px;box-shadow:0 1px 0 var(--out)}
 #muteBtn[aria-pressed="true"]{background:linear-gradient(#4a3530,#2c201c);color:#ffc44a}
 #volSlider{flex:1;width:100%;max-width:100%;margin:0;accent-color:#ff8a20;height:14px;background:transparent}
 
