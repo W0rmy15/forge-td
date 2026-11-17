@@ -154,7 +154,7 @@ button.danger{background:linear-gradient(#c45830,#8a2818);color:#fff}
 .sel{margin-top:6px;padding:6px}
 #roster .rteam{margin-top:2px;font-size:14px}
 #roster .rp{padding:1px 0;font-size:12px}
-#chatLog{height:52px;margin-top:4px;padding:3px 5px;font-size:11px}
+#chatLog{height:46px;margin-top:4px;padding:3px 5px;font-size:11px}
 #chatInput{margin-top:3px;padding:3px 6px;font-size:11px}
 #panel>.hint{font-size:11px;margin:4px 0 0;line-height:1.3}
 #game.screen{padding:4px 8px}
@@ -166,7 +166,7 @@ button.danger{background:linear-gradient(#c45830,#8a2818);color:#fff}
 .laneov[hidden]{display:none!important}
 
 /* sound controls — compact hammered-metal, matches the side panel */
-#audCtrl{align-items:center;gap:6px;margin:0 0 4px}
+#audCtrl{align-items:center;gap:6px;margin:0 0 2px}
 #muteBtn{padding:2px 8px;min-width:36px;font-size:14px;line-height:1.2;border-radius:8px;box-shadow:0 2px 0 var(--out)}
 #muteBtn[aria-pressed="true"]{background:linear-gradient(#4a3530,#2c201c);color:#ffc44a}
 #volSlider{flex:1;accent-color:#ff8a20;height:16px;background:transparent}
