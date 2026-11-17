@@ -44,8 +44,8 @@
     return gr;
   }
   function shine(g, x, y, r) {
-    g.beginPath(); g.ellipse(x - r * 0.32, y - r * 0.38, r * 0.34, r * 0.18, -0.6, 0, 7);
-    g.fillStyle = 'rgba(255,244,210,0.55)'; g.fill();
+    g.beginPath(); g.ellipse(x - r * 0.32, y - r * 0.38, r * 0.4, r * 0.22, -0.6, 0, 7);
+    g.fillStyle = 'rgba(255,250,230,0.82)'; g.fill();
   }
   /* Cached 5-point star vertices, keyed by points × inner ratio. */
   const STAR_PTS = new Map();
@@ -182,8 +182,11 @@
     g.restore();
   }
   function heat(g, R, a) {
-    g.beginPath(); g.ellipse(0, R * 0.15, R * 1.05, R * 0.7, 0, 0, 7);
-    g.fillStyle = 'rgba(255,90,20,' + (a == null ? 0.16 : a) + ')'; g.fill();
+    const k = a == null ? 1 : a / 0.16;
+    g.beginPath(); g.ellipse(0, R * 0.62, R * 1.35, R * 0.58, 0, 0, 7);
+    g.fillStyle = 'rgba(255,210,90,' + (0.42 * k).toFixed(3) + ')'; g.fill();
+    g.beginPath(); g.ellipse(0, R * 0.12, R * 1.05, R * 0.75, 0, 0, 7);
+    g.fillStyle = 'rgba(255,110,25,' + (0.28 * k).toFixed(3) + ')'; g.fill();
   }
   function forgeTeam(col) {
     const c = String(col || '').toLowerCase();
@@ -197,8 +200,8 @@
   /* Luminance-separated rings: T1 dark, T2 mid, T3 bright — shape pips carry the rest. */
   const TIER_RING = [null, '#3a2416', '#8a96aa', '#fff6a8'];
   const KIND = {
-    runner: ['#f0c060', '#ff9a28', '#ffe89a'],
-    swarm:  ['#5c2248', '#6a2030', '#2a1028'],
+    runner: ['#f0c060', '#ff9a28', '#fff6c4'],
+    swarm:  ['#5c2248', '#6a2030', '#141c28'],
     brute:  ['#6a2a18', '#8a3a20', '#4a2014'],
     boss:   ['#3a1830']
   };
@@ -311,20 +314,22 @@
     }
 
     if (kind === 'swarm') {
-      heat(g, R * 1.15, 0.28);
+      // cool teal underglow (not gold) so T3 swarm stays dark under tritanopia vs the pale runner
+      g.beginPath(); g.ellipse(0, R * 0.62, R * 1.25, R * 0.52, 0, 0, 7);
+      g.fillStyle = 'rgba(60,200,210,0.32)'; g.fill();
       tierRing(g, R * 1.05, tier);
       const mite = (x, y, r, seed) => {
         g.save(); g.translate(x, y);
         fillLump(g, r, col, Math.max(2.2, lw * 0.75), 1, 0.9, seed);
-        g.save(); lumpPath(g, r, 1, 0.9, seed); g.clip(); cracks(g, r, 2, '#ff8a20'); g.restore();
+        g.save(); lumpPath(g, r, 1, 0.9, seed); g.clip(); cracks(g, r, 2, '#7ee0e8'); g.restore();
         emberEye(g, 0, -r * 0.08, r * 0.22, false);
         // spark whisker — wide top silhouette, distinct from the runner's ears
         g.beginPath();
         g.moveTo(-r * 0.12, -r * 0.65);
         g.quadraticCurveTo(-r * 0.45, -r * 1.25, -r * 0.05, -r * 1.5);
         g.strokeStyle = OUT; g.lineWidth = Math.max(1.7, lw * 0.65); g.stroke();
-        g.strokeStyle = '#ffb020'; g.lineWidth = Math.max(1, lw * 0.35); g.stroke();
-        circ(g, -r * 0.05, -r * 1.5, Math.max(1.7, r * 0.18), '#ffe080', 1);
+        g.strokeStyle = '#8af0f4'; g.lineWidth = Math.max(1, lw * 0.35); g.stroke();
+        circ(g, -r * 0.05, -r * 1.5, Math.max(1.7, r * 0.18), '#c8ffff', 1);
         if (tier >= 1) plate(g, 0, r * 0.28, r * 0.95, r * 0.4, 0, tier, shade(col, 0.18));
         g.restore();
       };
@@ -536,8 +541,11 @@
   A.rotates = function (type) { return type !== 'frost'; };
   A.pad = function (ownerColor, lvl, cell) {
     const s = Math.max(22, cell * 0.82), L = lvl || 0;
-    return sprite(`pad|${ownerColor}|${L}|${s}`, s, s * 0.7, (g) => {
+    return sprite(`pad|${ownerColor}|${L}|${s}`, s, s * 0.78, (g) => {
       const w = s * 0.5, h = s * 0.28;
+      // light plinth disc so the anvil reads against dark basalt
+      g.beginPath(); g.ellipse(0, h * 0.72, w * 0.95, h * 0.55, 0, 0, 7);
+      g.fillStyle = 'rgba(255,230,170,0.55)'; g.fill();
       g.beginPath();
       g.moveTo(-w * 0.95, -h * 0.15);
       g.lineTo(-w * 0.2, -h * 0.7);
@@ -550,8 +558,16 @@
       g.lineTo(-w * 0.28, h * 0.35);
       g.lineTo(-w * 0.35, -h * 0.1);
       g.closePath();
-      g.fillStyle = glossy(g, 0, 0, s * 0.5, '#4a4440'); g.fill();
+      g.fillStyle = glossy(g, 0, -h * 0.2, s * 0.5, '#9a8e80'); g.fill();
       g.lineWidth = 2.4; g.strokeStyle = OUT; g.stroke();
+      // bright top-face rim
+      g.beginPath();
+      g.moveTo(-w * 0.18, -h * 0.68);
+      g.lineTo(w * 0.52, -h * 0.68);
+      g.lineTo(w * 0.88, -h * 0.12);
+      g.lineTo(-w * 0.32, -h * 0.12);
+      g.closePath();
+      g.strokeStyle = 'rgba(255,244,210,0.85)'; g.lineWidth = 2; g.stroke();
       // owner-color inlay on the face
       rrect(g, -w * 0.18, -h * 0.55, w * 0.55, h * 0.32, 1.2);
       g.fillStyle = ownerColor; g.fill();
@@ -606,11 +622,11 @@
   A.drawGrass = function (g, w, h, cell, seed) {
     const R = rng(seed);
     const sky = g.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, '#4a5850');
-    sky.addColorStop(0.55, '#3a4a42');
-    sky.addColorStop(1, '#2e3a34');
+    sky.addColorStop(0, '#7eab6c');
+    sky.addColorStop(0.55, '#6b9a5c');
+    sky.addColorStop(1, '#5a8a4e');
     g.fillStyle = sky; g.fillRect(0, 0, w, h);
-    const cols = ['#3e4c46', '#45534b', '#3a4a42', '#48564e'];
+    const cols = ['#74a062', '#6b9658', '#7eaa6c', '#649256'];
     for (let y = 0; y < h; y += cell) {
       for (let x = 0; x < w; x += cell) {
         if (((x / cell + y / cell) | 0) % 2) {
@@ -623,7 +639,7 @@
     g.globalAlpha = 1;
     for (let i = 0; i < 90; i++) {
       const x = R() * w, y = R() * h, r = 4 + R() * 10;
-      g.fillStyle = R() > 0.5 ? 'rgba(74,112,74,0.38)' : 'rgba(50,90,65,0.32)';
+      g.fillStyle = R() > 0.5 ? 'rgba(110,180,80,0.5)' : 'rgba(80,150,70,0.4)';
       g.beginPath(); g.ellipse(x, y, r, r * 0.6, R() * 3, 0, 7); g.fill();
     }
     for (let i = 0; i < 28; i++) {
@@ -643,33 +659,37 @@
 
   A.drawPath = function (g, pts, cell) {
     if (!pts.length) return;
-    const w = Math.max(16, cell * 0.5);
+    const X = (p) => (p.x != null ? p.x : p[0]), Y = (p) => (p.y != null ? p.y : p[1]);
+    const w = Math.max(18, cell * 0.58);
     const stroke = (width, style) => {
-      g.beginPath(); g.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
+      g.beginPath(); g.moveTo(X(pts[0]), Y(pts[0]));
+      for (let i = 1; i < pts.length; i++) g.lineTo(X(pts[i]), Y(pts[i]));
       g.strokeStyle = style; g.lineWidth = width; g.lineJoin = 'round'; g.lineCap = 'round'; g.stroke();
     };
-    // dark basalt edges stay darker than the slate under every CVD filter
-    stroke(w + 10, '#0e0c0c');
-    stroke(w + 6, '#1a1614');
-    stroke(w, '#2a2422');
-    stroke(w - 5, '#3a342e');
-    stroke(Math.max(2, w * 0.16), 'rgba(255,140,40,0.28)');
+    // dark outer edge (luminance contrast vs the lighter moss, under every CVD filter)
+    stroke(w + 12, '#1a120c');
+    // molten-orange rune rim — the path preview reads at a glance
+    stroke(w + 8, '#ff7a18');
+    stroke(w + 5, '#ffc44a');
+    // raised basalt body, still darker than the ground
+    stroke(w, '#3a3028');
+    stroke(w - 5, '#5a4a3c');
+    stroke(Math.max(2.4, w * 0.18), 'rgba(255,170,50,0.7)');
     for (let i = 3; i < pts.length - 2; i += 3) {
-      const p = pts[i], q = pts[i + 1] || p, dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy) || 1;
+      const p = pts[i], q = pts[i + 1] || p, dx = X(q) - X(p), dy = Y(q) - Y(p), len = Math.hypot(dx, dy) || 1;
       const nx = -dy / len, ny = dx / len;
-      rune(g, p.x + nx * (w * 0.28), p.y + ny * (w * 0.28), Math.max(2.8, cell * 0.1), 'rgba(255,180,60,0.72)');
+      rune(g, X(p) + nx * (w * 0.28), Y(p) + ny * (w * 0.28), Math.max(3, cell * 0.11), '#ffc44a');
     }
-    g.fillStyle = '#0a0808';
-    g.strokeStyle = 'rgba(255,200,120,0.4)';
-    g.lineWidth = 1;
+    g.fillStyle = '#1a120c';
+    g.strokeStyle = '#ffb020';
+    g.lineWidth = 1.2;
     for (let i = 6; i < pts.length - 4; i += 5) {
-      const p = pts[i], q = pts[i + 1], dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy) || 1;
-      const ux = dx / len, uy = dy / len, s = Math.max(5, cell * 0.2);
+      const p = pts[i], q = pts[i + 1], dx = X(q) - X(p), dy = Y(q) - Y(p), len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len, s = Math.max(5.5, cell * 0.22);
       g.beginPath();
-      g.moveTo(p.x + ux * s, p.y + uy * s);
-      g.lineTo(p.x - uy * s * 0.7, p.y + ux * s * 0.7);
-      g.lineTo(p.x + uy * s * 0.7, p.y - ux * s * 0.7);
+      g.moveTo(X(p) + ux * s, Y(p) + uy * s);
+      g.lineTo(X(p) - uy * s * 0.7, Y(p) + ux * s * 0.7);
+      g.lineTo(X(p) + uy * s * 0.7, Y(p) - ux * s * 0.7);
       g.closePath(); g.fill(); g.stroke();
     }
   };
@@ -774,8 +794,15 @@
     const s = size || 40, z = zoom || 1, pad = 2;
     const c = document.createElement('canvas'); c.width = s; c.height = s;
     const g = c.getContext('2d');
+    const cx = s / 2, cy = s / 2, pr = s * 0.48;
+    const bg = g.createRadialGradient(cx, cy - 1, 1, cx, cy, pr);
+    bg.addColorStop(0, '#fff3c8');
+    bg.addColorStop(0.55, '#f0b44a');
+    bg.addColorStop(1, 'rgba(180,90,20,0)');
+    g.fillStyle = bg; g.beginPath(); g.arc(cx, cy + 1, pr, 0, 7); g.fill();
+    g.strokeStyle = 'rgba(26,21,18,0.55)'; g.lineWidth = 1.2; g.stroke();
     const sc = Math.min((s - pad * 2) / spr.w, (s - pad * 2) / spr.h) * z;
-    g.drawImage(spr.c, (s - spr.w * sc) / 2, (s - spr.h * sc) / 2, spr.w * sc, spr.h * sc);
+    g.drawImage(spr.c, (s - spr.w * sc) / 2, (s - spr.h * sc) / 2 - 1, spr.w * sc, spr.h * sc);
     return c.toDataURL();
   };
 
