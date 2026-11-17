@@ -16,13 +16,15 @@
   function sprite(key, w, h, draw) {
     let s = SPR.get(key);
     if (s) return s;
-    const c = (typeof OffscreenCanvas !== 'undefined') ? new OffscreenCanvas(Math.ceil(w * SS), Math.ceil(h * SS)) : Object.assign(document.createElement('canvas'), { width: Math.ceil(w * SS), height: Math.ceil(h * SS) });
+    const W = Math.max(1, Math.ceil(Number(w) || 1)), H = Math.max(1, Math.ceil(Number(h) || 1));
+    const cw = Math.max(1, Math.ceil(W * SS)), ch = Math.max(1, Math.ceil(H * SS));
+    const c = (typeof OffscreenCanvas !== 'undefined') ? new OffscreenCanvas(cw, ch) : Object.assign(document.createElement('canvas'), { width: cw, height: ch });
     const g = c.getContext('2d');
     g.scale(SS, SS);
-    g.translate(w / 2, h / 2);
+    g.translate(W / 2, H / 2);
     g.lineJoin = 'round'; g.lineCap = 'round';
     draw(g);
-    s = { c, w, h };
+    s = { c, w: W, h: H };
     SPR.set(key, s);
     return s;
   }
@@ -183,10 +185,10 @@
   }
   function heat(g, R, a) {
     const k = a == null ? 1 : a / 0.16;
-    g.beginPath(); g.ellipse(0, R * 0.62, R * 1.35, R * 0.58, 0, 0, 7);
-    g.fillStyle = 'rgba(255,210,90,' + (0.42 * k).toFixed(3) + ')'; g.fill();
-    g.beginPath(); g.ellipse(0, R * 0.12, R * 1.05, R * 0.75, 0, 0, 7);
-    g.fillStyle = 'rgba(255,110,25,' + (0.28 * k).toFixed(3) + ')'; g.fill();
+    g.beginPath(); g.ellipse(0, R * 0.55, R * 1.05, R * 0.45, 0, 0, 7);
+    g.fillStyle = 'rgba(255,210,90,' + (0.38 * k).toFixed(3) + ')'; g.fill();
+    g.beginPath(); g.ellipse(0, R * 0.1, R * 0.85, R * 0.6, 0, 0, 7);
+    g.fillStyle = 'rgba(255,110,25,' + (0.24 * k).toFixed(3) + ')'; g.fill();
   }
   function forgeTeam(col) {
     const c = String(col || '').toLowerCase();
@@ -315,7 +317,7 @@
 
     if (kind === 'swarm') {
       // cool teal underglow (not gold) so T3 swarm stays dark under tritanopia vs the pale runner
-      g.beginPath(); g.ellipse(0, R * 0.62, R * 1.25, R * 0.52, 0, 0, 7);
+      g.beginPath(); g.ellipse(0, R * 0.55, R * 1.05, R * 0.42, 0, 0, 7);
       g.fillStyle = 'rgba(60,200,210,0.32)'; g.fill();
       tierRing(g, R * 1.05, tier);
       const mite = (x, y, r, seed) => {
@@ -367,65 +369,53 @@
 
   A.creep = function (kind, v, R) {
     const Rq = Math.round(R * 2) / 2, vk = kind === 'neutral' ? ((v || 1) - 1) % BALLOON.length : kind === 'boss' ? 0 : Math.min(3, v || 0);
-    const size = Rq * 5.2 + 16;
+    // Tight canvas: T3 ring spikes reach ~R+8; keep a 2 px pad. Smaller than 5.2R+16 to cut overdraw.
+    const size = Math.ceil(Math.max(Rq * 3.8 + 8, (Rq + 8) * 2 + 4));
     return sprite(`cr|${kind}|${vk}|${Rq}`, size, size, (g) => drawCreep(g, kind, kind === 'neutral' ? vk + 1 : vk, Rq));
   };
   A.creepFlash = function (R) {
-    const Rq = Math.round(R * 2) / 2, size = Rq * 5.2 + 16;
+    const Rq = Math.round(R * 2) / 2, size = Math.ceil(Rq * 2.8 + 6);
     return sprite(`cf|${Rq}`, size, size, (g) => {
-      g.save();
-      g.globalCompositeOperation = 'lighter';
-      g.beginPath(); g.arc(0, 0, Rq * 1.15, 0, 7);
-      const gr = g.createRadialGradient(0, 0, Rq * 0.15, 0, 0, Rq * 1.15);
+      g.beginPath(); g.arc(0, 0, Rq * 1.05, 0, 7);
+      const gr = g.createRadialGradient(0, 0, Rq * 0.2, 0, 0, Rq * 1.05);
       gr.addColorStop(0, 'rgba(255,245,200,0.95)');
-      gr.addColorStop(0.4, 'rgba(255,140,40,0.7)');
+      gr.addColorStop(0.55, 'rgba(255,140,40,0.55)');
       gr.addColorStop(1, 'rgba(255,40,0,0)');
       g.fillStyle = gr; g.fill();
-      g.restore();
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * Math.PI * 2;
-        g.beginPath();
-        g.moveTo(Math.cos(a) * Rq * 0.4, Math.sin(a) * Rq * 0.4);
-        g.lineTo(Math.cos(a) * Rq * 1.35, Math.sin(a) * Rq * 1.35);
-        g.strokeStyle = 'rgba(255,220,120,0.85)'; g.lineWidth = 1.8; g.stroke();
-      }
     });
   };
   A.creepIce = function (R) {
-    const Rq = Math.round(R * 2) / 2, size = Rq * 5.2 + 16;
+    const Rq = Math.round(R * 2) / 2, size = Math.ceil(Rq * 2.6 + 8);
     return sprite(`ci|${Rq}`, size, size, (g) => {
-      g.globalAlpha = 0.88;
+      // Tight crystal rim — avoid a large translucent fill (overdraw on crowded boards)
       g.beginPath();
-      const n = 9;
+      const n = 8;
       for (let i = 0; i <= n; i++) {
-        const a = (i / n) * Math.PI * 2 - Math.PI / 2, j = (i % 2 ? 1.18 : 0.98);
+        const a = (i / n) * Math.PI * 2 - Math.PI / 2, j = (i % 2 ? 1.12 : 0.96);
         g[i ? 'lineTo' : 'moveTo'](Math.cos(a) * Rq * j, Math.sin(a) * Rq * j);
       }
       g.closePath();
-      const gr = g.createRadialGradient(0, 0, Rq * 0.2, 0, 0, Rq * 1.15);
-      gr.addColorStop(0, 'rgba(200,240,255,0.15)');
-      gr.addColorStop(0.7, 'rgba(120,200,230,0.45)');
-      gr.addColorStop(1, 'rgba(80,160,200,0.7)');
-      g.fillStyle = gr; g.fill();
-      g.lineWidth = 2.2; g.strokeStyle = '#7fe0ff'; g.stroke();
-      g.lineWidth = 1.1; g.strokeStyle = OUT; g.stroke();
-      // steam puffs
-      g.globalAlpha = 0.45;
-      circ(g, Rq * 0.55, -Rq * 1.05, Rq * 0.22, '#d8eef8', 0);
-      circ(g, Rq * 0.85, -Rq * 1.25, Rq * 0.14, '#eef6fb', 0);
-      circ(g, -Rq * 0.4, -Rq * 1.15, Rq * 0.18, '#d8eef8', 0);
-      g.globalAlpha = 1;
+      g.fillStyle = 'rgba(150,225,255,0.22)'; g.fill();
+      g.lineWidth = Math.max(1.2, Rq * 0.12); g.strokeStyle = 'rgba(200,240,255,0.9)'; g.stroke();
+      g.fillStyle = 'rgba(255,255,255,0.9)';
+      star(g, Rq * 0.5, -Rq * 0.55, Math.max(1.5, Rq * 0.28), 4, 0.35); g.fill();
+    });
+  };
+  // Tight cyan ring for low-detail mode (no big translucent fill)
+  A.creepIceLite = function (R) {
+    const Rq = Math.round(R * 2) / 2, size = Math.ceil(Rq * 2.2 + 4);
+    return sprite(`cil|${Rq}`, size, size, (g) => {
+      g.strokeStyle = 'rgba(140,230,255,0.95)';
+      g.lineWidth = Math.max(1.8, Rq * 0.16);
+      g.beginPath(); g.arc(0, 0, Rq * 0.95, 0, 7); g.stroke();
     });
   };
   A.shadow = function (R) {
-    const Rq = Math.round(R * 2) / 2, w = Rq * 3.2, h = Rq * 1.7;
+    const Rq = Math.round(R * 2) / 2, w = Rq * 2.4, h = Rq * 1.1;
     return sprite(`sh|${Rq}`, w, h, (g) => {
-      g.save();
-      g.shadowColor = 'rgba(10,8,6,0.55)';
-      g.shadowBlur = Math.max(4, Rq * 0.5);
-      g.fillStyle = 'rgba(10,8,6,0.42)';
-      g.beginPath(); g.ellipse(0, 0, Rq * 1.08, Rq * 0.42, 0, 0, 7); g.fill();
-      g.restore();
+      // Simple ellipse, no shadowBlur (that only bloated the baked bitmap)
+      g.fillStyle = 'rgba(10,8,6,0.32)';
+      g.beginPath(); g.ellipse(0, 0, Rq * 1.05, Rq * 0.42, 0, 0, 7); g.fill();
     });
   };
 
