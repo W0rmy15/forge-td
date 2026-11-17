@@ -178,13 +178,23 @@
   let sendSig = '';
   function renderSendBtns(m, wave) {
     const tiers = m.tiers || {};
-    const sig = JSON.stringify([tiers, m.gold, wave]);
+    const enemyB = state && state.boards && state.boards[m.team === 'L' ? 'R' : 'L'];
+    const full = !!(enemyB && enemyB.laneFull);
+    const lane = (enemyB && enemyB.lane) || 0;
+    const wait = Math.max(0, Math.ceil(lane - (S.LANE_MAX_AHEAD || 45)));
+    const sig = JSON.stringify([tiers, m.gold, wave, full, wait]);
     if (sig === sendSig) return; sendSig = sig;
     for (const [k, t] of Object.entries(S.SENDS)) {
       const tier = tiers[k] || 0, sp = S.sendSpec(k, tier), up = S.sendUpCost(k, tier), unlock = up !== null ? S.SEND_UP.UNLOCK_WAVE[tier + 1] : 0;
       const html = `<img src="${creepIcon(k, tier)}" alt=""><span class="nm"><span class="k">${t.key.toUpperCase()}</span> ${t.name}</span><span class="cost">${sp.cost}g <small>+${Math.round(sp.income * 10) / 10}</small></span>${pips(tier)}`;
-      if (sendBtns[k].dataset.html !== html) { sendBtns[k].innerHTML = html; sendBtns[k].dataset.html = html; sendBtns[k].title = sendTitle(k, tier); }
+      if (sendBtns[k].dataset.html !== html) { sendBtns[k].innerHTML = html; sendBtns[k].dataset.html = html; }
+      sendBtns[k].title = sendTitle(k, tier) + (full ? ` Lane full — wait ${wait || 1}s.` : '');
       sendBtns[k].disabled = m.gold < sp.cost;
+      sendBtns[k].classList.toggle('lanefull', full);
+      const col = sendBtns[k].parentNode;
+      let ov = col && col.querySelector('.laneov');
+      if (col && !ov) { ov = document.createElement('span'); ov.className = 'laneov'; ov.setAttribute('aria-hidden', 'true'); col.appendChild(ov); }
+      if (ov) { ov.hidden = !full; ov.textContent = full ? (wait ? '⏳ ' + wait + 's' : '⏳') : ''; }
       const uh = up === null ? '★ MAX' : wave < unlock ? `🔒 T${tier + 1} @ wave ${unlock}` : `⬆ T${tier + 1} · ${up}g`;
       if (upBtns[k].dataset.html !== uh) { upBtns[k].innerHTML = uh; upBtns[k].dataset.html = uh; }
       upBtns[k].title = up === null ? `${t.name} is max tier` : `[Shift+${t.key.toUpperCase()}] Upgrade ${t.name} to tier ${tier + 1}: ${S.SEND_TRAITS[k].desc[tier + 1]}, HP ×${S.tierHp(k, tier + 1)} (price ×${S.SEND_UP.COST[tier + 1]}). Lasts the whole match. Unlocks at wave ${unlock}.`;
