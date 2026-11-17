@@ -11,11 +11,13 @@ const ORDER = [];
   for (const c of cols) ORDER.push([c, r]);
 });
 
-// strat: {tower:'arrow'|'cannon'|'frost'|'mix', send:0..1, kind:'runner'|'brute'|'swarm'|'mix', need:'up'|'mid'|'wall'}
+// strat: {tower:'arrow'|'cannon'|'frost'|'mix', send:0..1, kind:'runner'|'brute'|'swarm'|'mix', need:'up'|'mid'|'wall', burst?:k}
 function botAct(room, p, strat, rng) {
   const g = room.game, B = g.boards[p.team];
   const kinds = strat.kind === 'mix' ? ['runner', 'swarm', 'brute'] : [strat.kind];
-  for (let guard = 0; guard < 5 && strat.send > 0; guard++) {
+  // burst: k -> bank the send budget and dump it all on every k-th wave (tests unlimited sends per wave)
+  const sendNow = !strat.burst || (g.wave > 0 && g.wave % strat.burst === 0 && g.nextWave > S.WAVE_EVERY - 6);
+  for (let guard = 0; guard < (strat.burst ? 200 : 5) && strat.send > 0 && sendNow; guard++) {
     const k = kinds[p._kidx % kinds.length], cost = S.SENDS[k].cost, total = p._def + p._send;
     if (p.gold >= cost && p._send + cost <= strat.send * (total + cost) + 1e-9) {
       if (G.doSend(room, p, k)) break; p._send += cost; p._kidx++;
@@ -28,8 +30,10 @@ function botAct(room, p, strat, rng) {
     const type = types[p._tidx % types.length];
     const cands = ORDER.filter(([c, r]) => !B.towers.has(c + ',' + r) && !p._failed.has(c + ',' + r));
     const wantBuild = cands.length && (B.towers.size < need || mine.every((t) => t.lvl === 2));
+    // burst bots bank their send share: defense may only use (1 - send) of everything earned so far
+    const defOk = (cost) => !strat.burst || p._def + cost <= (1 - strat.send) * (p._def + p._send + p.gold);
     if (wantBuild) {
-      if (p.gold < S.TOWERS[type].cost) break;
+      if (p.gold < S.TOWERS[type].cost || !defOk(S.TOWERS[type].cost)) break;
       let ok = false;
       for (const [c, r] of cands.slice(0, 6)) { // a creep may be in the way: try the next few maze cells
         const err = G.build(room, p, type, c, r);
@@ -41,7 +45,7 @@ function botAct(room, p, strat, rng) {
     } else {
       const up = mine.filter((t) => t.lvl < 2).sort((a, b) => a.lvl - b.lvl)[0];
       if (!up) break; const cost = S.upgradeCost(up.type, up.lvl);
-      if (p.gold < cost) break;
+      if (p.gold < cost || !defOk(cost)) break;
       G.upgrade(room, p, up.c, up.r); p._def += cost;
     }
   }

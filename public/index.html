@@ -32,6 +32,7 @@
 </div>
 
 <div id="game" class="screen hidden">
+  <div id="sdBanner" class="banner hidden"></div>
   <div class="gamewrap">
     <canvas id="cv" width="760" height="660"></canvas>
     <div id="panel">
@@ -43,7 +44,6 @@
       <div id="buildBtns" class="btns"></div>
       <h3>Send creeps <small>(+income)</small></h3>
       <div id="sendBtns" class="btns"></div>
-      <div class="stat small"><span>Your sends this wave</span><b id="sendsWave">0</b></div>
       <div class="stat small"><span>Your team's sends queued at enemy</span><b id="sendsQueued">0</b></div>
       <div class="stat small"><span>Enemy sends queued at you</span><b id="sendsOnMe">0</b></div>
       <div id="sel" class="sel hidden"></div>
@@ -51,7 +51,7 @@
       <div id="roster"></div>
       <div id="chatLog"></div>
       <input id="chatInput" placeholder="Enter to chat" maxlength="120">
-      <p class="hint">Keys: 1/2/3 tower · Q/W/E send · U upgrade · X twice to sell · Esc cancel</p>
+      <p class="hint">Keys: 1/2/3 tower · Q/W/E send · U upgrade · X twice to sell (queued while creeps are on your board) · Esc cancel</p>
     </div>
   </div>
   <div id="over" class="overlay hidden"><div class="card"><h1 id="overText"></h1><p id="overReason" class="hint"></p><div id="overStats"></div><button id="backBtn" class="big hidden">Back to lobby</button><p id="overWait" class="hint">Waiting for host…</p></div></div>

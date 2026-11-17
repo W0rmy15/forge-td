@@ -2,14 +2,16 @@
 // ALL tuning numbers live here.
 (function (root) {
   const S = {
-    VERSION: '0.2.0',
+    VERSION: '0.3.0',
     COLS: 11, ROWS: 20,
     SPAWN: { c: 5, r: 0 }, BASE: { c: 5, r: 19 },
     // economy
     START_GOLD: 150, START_INCOME: 18, LIVES: 20,
     INCOME_EVERY: 10, WAVE_EVERY: 30, FIRST_WAVE: 20,
     MAX_PER_TEAM: 2, SELL_REFUND: 0.7,
-    SELL_DELAY: 3, // seconds a tower is disabled before it is removed, if creeps are on the board
+    // Sales are queued while your board is busy (creeps on it, or a spawn due within SELL_SPAWN_GUARD s)
+    // and execute the moment it is clear. The tower keeps firing until then.
+    SELL_SPAWN_GUARD: 2,
     MAX_GOLD: 1e7, MAX_INCOME: 1e5,
     // neutral waves: hp = BASE_HP * GROWTH^(n-1) * teamScale(teamSize)
     WAVE: {
@@ -17,10 +19,12 @@
       COUNT_BASE: 6, COUNT_MAX: 22, SPACING: 0.6,
       SPEED: 1.25, FAST_SPEED: 1.7, FAST_EVERY: 3,
       BOSS_EVERY: 5, BOSS_HP_MULT: 9, BOSS_LEAK: 3, BOSS_SPEED: 0.8,
-      // sudden death: from this wave on, every wave gets an extra HP multiplier and leaks cost double
-      SUDDEN_DEATH_WAVE: 24, SUDDEN_DEATH_GROWTH: 1.45, SUDDEN_DEATH_LEAK_MULT: 2,
+      // sudden death: from this wave on, every wave gets an extra HP multiplier (compounding per wave).
+      // When a base falls in sudden death the current wave is finished and the side that lost fewer lives in total wins.
+      SUDDEN_DEATH_WAVE: 22, SUDDEN_DEATH_GROWTH: 1.25, SUDDEN_DEATH_LEAK_MULT: 1,
     },
-    teamScale(teamSize) { return 0.5 + 0.5 * Math.max(1, teamSize); },
+    // waves and sends both scale with team size (2v2 = x2 HP)
+    teamScale(teamSize) { return Math.max(1, teamSize); },
     // tower damage multiplier against slowed creeps (Frost synergy)
     SLOWED_DMG_MULT: 1.25,
     TOWERS: {
@@ -33,19 +37,25 @@
     },
     // cost to upgrade to level index i = tower.cost * UPGRADE_MULT[i]
     UPGRADE_MULT: [0, 1, 1.6],
-    // Sends: hp = hpMult * neutral wave HP of the current wave (min wave 1). Payback = cost / income * INCOME_EVERY.
-    SEND_CAP_PER_WAVE: 6, // sends per player between two neutral waves
+    // Sends: hp = hpMult * neutral wave HP of the current wave (min wave 1) * teamScale(team size). Payback = cost / income * INCOME_EVERY.
+    // bounty = gold the defender's tower owner gets for the kill.
     // diminishing returns: income gained per send = income * F / (F + income already gained from sends)
-    SEND_INCOME_FALLOFF: 150,
+    SEND_INCOME_FALLOFF: 120,
+    // sends are unlimited (gold is the only limit); each enemy board has one send lane: a send occupies it for
+    // lane * SEND_LANE_MULT seconds (swarm creeps enter gap s apart), so banked dumps trickle in
+    SEND_LANE_MULT: 1.5,
+    SEND_RAMP: { START: 0.2, PER_WAVE: 0.06 }, // send HP multiplier = min(1, START + PER_WAVE * wave)
     SENDS: {
-      runner: { name: 'Runner', key: 'q', desc: 'Fast', cost: 35, income: 2, hpMult: 1.0, speed: 2.6, bounty: 3, leak: 1, count: 1, radius: 0.22, color: '#7bed6f' },
-      brute: { name: 'Brute', key: 'w', desc: 'Very tanky, leaks cost 2', cost: 70, income: 4, hpMult: 5.5, speed: 0.95, bounty: 6, leak: 2, count: 1, radius: 0.36, color: '#e05d5d' },
-      swarm: { name: 'Swarm', key: 'e', desc: '5 small', cost: 50, income: 3, hpMult: 0.4, speed: 1.8, bounty: 1, leak: 1, count: 5, radius: 0.16, color: '#c58bff' },
+      runner: { name: 'Runner', key: 'q', desc: 'Fast', cost: 35, income: 2, hpMult: 1.8, speed: 2.6, bounty: 9, leak: 1, count: 1, gap: 0, lane: 0.6, radius: 0.22, color: '#7bed6f' },
+      brute: { name: 'Brute', key: 'w', desc: 'Very tanky, leaks cost 2', cost: 70, income: 4, hpMult: 9, speed: 0.95, bounty: 18, leak: 2, count: 1, gap: 0, lane: 2, radius: 0.36, color: '#e05d5d' },
+      swarm: { name: 'Swarm', key: 'e', desc: '5 small', cost: 50, income: 3, hpMult: 0.75, speed: 1.8, bounty: 3, leak: 1, count: 5, gap: 0.25, lane: 1.5, radius: 0.16, color: '#c58bff' },
     },
     NEUTRAL: { color: '#d9d9d9', bossColor: '#ff9f43' },
   };
   S.waveHp = function (n) { return S.WAVE.BASE_HP * Math.pow(S.WAVE.GROWTH, Math.max(1, n) - 1); };
-  S.sendHp = function (kind, wave) { return Math.round(S.SENDS[kind].hpMult * S.waveHp(Math.max(1, wave))); };
+  // early-game ramp on send HP: x0.26 at wave 1 rising to x1 at wave 14, so early send rushes can't flatten a defense before it exists
+  S.sendRamp = function (wave) { return Math.min(1, S.SEND_RAMP.START + S.SEND_RAMP.PER_WAVE * Math.max(1, wave)); };
+  S.sendHp = function (kind, wave, teamSize) { return Math.round(S.SENDS[kind].hpMult * S.waveHp(Math.max(1, wave)) * S.teamScale(teamSize || 1) * S.sendRamp(wave)); };
   S.hasTower = function (type) { return typeof type === 'string' && Object.prototype.hasOwnProperty.call(S.TOWERS, type); };
   S.hasSend = function (kind) { return typeof kind === 'string' && Object.prototype.hasOwnProperty.call(S.SENDS, kind); };
   S.towerSpent = function (type, lvl) {

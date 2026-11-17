@@ -34,8 +34,9 @@
     ws = sock;
     sock.onopen = onOpen;
     sock.onmessage = (e) => { if (ws === sock) onMsg(JSON.parse(e.data)); };
-    sock.onclose = () => {
+    sock.onclose = (ev) => {
       if (ws !== sock) return;
+      if (ev && ev.code === 4001) { replaced(); return; } // seat taken over by another tab: never auto-retry
       if (code) rejoinCode = code; // keep the room code across retries
       code = null;
       if (rejoinCode) scheduleRetry();
@@ -53,11 +54,24 @@
     }, delay);
   }
   function stopRetry() { clearTimeout(retryTimer); rejoinCode = null; retries = 0; }
+  // leave the room UI and go back to the menu with a message (keeps nothing that would trigger a retry)
+  function toMenu(msg, dropToken) {
+    const c = rejoinCode || code; stopRetry(); code = null; state = null; prevState = null; lobby = null;
+    if (c && dropToken) localStorage.removeItem('ftd_token_' + c);
+    if (c) $('codeInput').value = c;
+    history.replaceState(null, '', location.pathname);
+    show('menu'); $('menuErr').textContent = msg;
+  }
+  let wasReplaced = false;
+  function replaced() {
+    if (wasReplaced) return; wasReplaced = true;
+    toMenu('This seat was opened in another tab or window. Click Join room to take it back here.', false);
+  }
   function sendMsg(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
 
   function onMsg(m) {
     if (m.t === 'joined') {
-      you = m.you; code = m.code; rejoinCode = null; retries = 0; clearTimeout(retryTimer);
+      you = m.you; code = m.code; rejoinCode = null; retries = 0; clearTimeout(retryTimer); wasReplaced = false;
       if (m.rejoined) toast('Reconnected', true);
       localStorage.setItem('ftd_token_' + code, m.token);
       history.replaceState(null, '', '?room=' + code);
@@ -69,11 +83,10 @@
     }
     else if (m.t === 'err') {
       toast(m.msg);
-      if (m.code === 'noroom') { // room is gone: stop retrying and go back to the menu
-        const c = rejoinCode || code; stopRetry(); code = null; state = null; lobby = null;
-        if (c) localStorage.removeItem('ftd_token_' + c);
-        history.replaceState(null, '', location.pathname);
-        show('menu'); $('menuErr').textContent = m.msg;
+      if (m.code === 'replaced') replaced();
+      else if (m.code === 'noroom' || m.code === 'joinfail' || (!code && rejoinCode)) {
+        // any join failure (room gone, game in progress, room full): stop retrying and go back to the menu
+        toMenu(m.msg, true);
       } else if (!code) $('menuErr').textContent = m.msg;
     }
     else if (m.t === 'chat') addChat(m);
@@ -127,7 +140,7 @@
   }
   for (const [k, t] of Object.entries(S.SENDS)) {
     const b = document.createElement('button');
-    b.innerHTML = `<span class="k">${t.key.toUpperCase()}</span> ${t.name}<br>${t.cost}g +${t.income}`; b.title = `${t.desc}: ${t.count}× ${Math.round(t.hpMult * 100)}% of a wave creep's HP. Income gain shrinks as your send income grows.`;
+    b.innerHTML = `<span class="k">${t.key.toUpperCase()}</span> ${t.name}<br>${t.cost}g +${t.income}`; b.title = `${t.desc}: ${t.count}× ${Math.round(t.hpMult * 100)}% of a wave creep's HP (×team size; weaker before wave 10). Kill bounty ${t.bounty}g for the defender. Income gain shrinks as your send income grows.`;
     b.onclick = () => sendMsg({ t: 'send', kind: k });
     $('sendBtns').appendChild(b); sendBtns[k] = b;
   }
@@ -141,9 +154,7 @@
     $('nextIncome').textContent = Math.ceil(s.nextIncome) + 's';
     $('wave').textContent = s.wave; $('nextWave').textContent = Math.ceil(s.nextWave) + 's';
     for (const [k, t] of Object.entries(S.TOWERS)) { buildBtns[k].classList.toggle('active', buildType === k); buildBtns[k].disabled = m.gold < t.cost; }
-    const capped = (m.sw || 0) >= S.SEND_CAP_PER_WAVE;
-    for (const [k, t] of Object.entries(S.SENDS)) sendBtns[k].disabled = m.gold < t.cost || capped;
-    $('sendsWave').textContent = `${m.sw || 0}/${S.SEND_CAP_PER_WAVE}`;
+    for (const [k, t] of Object.entries(S.SENDS)) sendBtns[k].disabled = m.gold < t.cost;
     const enemy = m.team === 'L' ? 'R' : 'L';
     $('sendsQueued').textContent = s.boards[enemy].queuedSends || 0;
     $('sendsOnMe').textContent = s.boards[m.team].queuedSends || 0;
@@ -158,15 +169,17 @@
     }
     // selection panel
     renderSel();
+    renderBanner(s, m);
     // effects from events
     for (const e of s.ev) {
       if (e.k === 'shot') fx.push({ k: 'shot', ...e, t0: performance.now(), dur: e.tt === 'cannon' ? 220 : 120 });
       else if (e.k === 'boom' || e.k === 'chill') fx.push({ ...e, t0: performance.now(), dur: 300 });
-      else if (e.k === 'sudden') toast('SUDDEN DEATH: waves get much stronger and leaks cost double!');
-      else if (e.k === 'send' && e.id === you) { toast(`Sent ${S.SENDS[e.kind].name}${S.SENDS[e.kind].count > 1 ? ' ×' + S.SENDS[e.kind].count : ''} (${e.n}/${S.SEND_CAP_PER_WAVE} this wave)`, true); flashBtn(sendBtns[e.kind]); }
-      else if (e.k === 'send' && e.team === m.team) toast(`${e.name} sent ${S.SENDS[e.kind].name}`, true);
+      else if (e.k === 'sudden') toast(`SUDDEN DEATH: every wave now gets ×${S.WAVE.SUDDEN_DEATH_GROWTH} more HP!`, false, 'sudden');
+      else if (e.k === 'finishing') toast(e.fell === 'both' ? 'Both bases fell! Finishing the wave…' : e.fell === m.team ? 'Your base fell! Finishing the wave: fewer total lives lost still wins' : 'Enemy base fell! Finishing the wave…', false, 'fin');
+      else if (e.k === 'send' && e.id === you) { toast(`Sent ${S.SENDS[e.kind].name}${S.SENDS[e.kind].count > 1 ? ' ×' + S.SENDS[e.kind].count : ''} (${e.n} sent this game)`, true, 'mysend'); flashBtn(sendBtns[e.kind]); }
+      else if (e.k === 'send' && e.team === m.team) toast(`${e.name} sent ${S.SENDS[e.kind].name}`, true, 'teamsend');
       else if (e.k === 'wave') toast(e.boss ? `Wave ${e.n}: BOSS incoming!` : `Wave ${e.n} incoming`, true);
-      else if (e.k === 'send' && e.team !== m.team) toast(`${e.name} sent ${S.SENDS[e.kind].name}s at you!`);
+      else if (e.k === 'send' && e.team !== m.team) enemySendToast(e);
     }
     if (s.phase === 'over' || s.winner) {
       $('over').classList.remove('hidden');
@@ -176,6 +189,24 @@
     } else $('over').classList.add('hidden');
   }
 
+  // enemy sends are tallied into one toast while it is queued or showing, so they never push other toasts out
+  let enemyTally = {};
+  function enemySendToast(e) {
+    if (!toastHas('esend')) enemyTally = {};
+    enemyTally[e.kind] = (enemyTally[e.kind] || 0) + S.SENDS[e.kind].count;
+    toast('Incoming enemy sends: ' + Object.entries(enemyTally).map(([k, n]) => `${n}× ${S.SENDS[k].name}`).join(', '), false, 'esend');
+  }
+  // permanent HUD banner for sudden death / the final wave
+  function renderBanner(s, m) {
+    const el = $('sdBanner'); let txt = '', cls = '';
+    if (s.fin) {
+      txt = s.fin.fell === 'both' ? '⚖️ Both bases fell — finishing the wave. Fewer total lives lost wins.'
+        : `⚖️ ${s.fin.fell === m.team ? 'Your' : 'The enemy'} base fell — finishing wave ${s.fin.wave}. Fewer total lives lost (overkill counts) wins.`;
+      cls = 'fin';
+    } else if (s.sd) txt = `☠️ SUDDEN DEATH — each wave gets ×${S.WAVE.SUDDEN_DEATH_GROWTH} extra HP. If a base falls, the wave is finished and fewer lives lost wins.`;
+    else if (s.wave >= S.WAVE.SUDDEN_DEATH_WAVE - 3) { txt = `Sudden death starts at wave ${S.WAVE.SUDDEN_DEATH_WAVE}`; cls = 'soon'; }
+    if (el.dataset.txt !== txt) { el.dataset.txt = txt; el.textContent = txt; el.className = 'banner' + (cls ? ' ' + cls : '') + (txt ? '' : ' hidden'); }
+  }
   function flashBtn(b) { if (!b) return; b.classList.add('flash'); setTimeout(() => b.classList.remove('flash'), 250); }
   function towerAt(b, c, r) { if (!state) return null; const t = state.boards[b].towers.find((t) => t[1] === c && t[2] === r); return t ? { id: t[0], c: t[1], r: t[2], type: t[3], lvl: t[4], owner: t[5], selling: !!t[6] } : null; }
 
@@ -191,10 +222,12 @@
     const owner = state.players.find((p) => p.id === t.owner);
     const nx = up !== null ? spec.levels[t.lvl + 1] : null;
     const armed = sellArm && sellArm.c === t.c && sellArm.r === t.r && performance.now() < sellArm.until;
-    const busy = state.boards[m.team].creeps.length > 0;
+    const busy = !!state.boards[m.team].busy; // server's rule: creeps on the board or a spawn due
     const html = `<b>${spec.name}</b> Lv ${t.lvl + 1}/3 ${mine ? '' : `<small>(${esc(owner ? owner.name : '?')}'s)</small>`}<br>
       <small>Dmg ${st.dmg}${nx ? '→' + nx.dmg : ''} · Range ${st.range}${st.splash ? ' · Splash ' + st.splash : ''}${st.slow ? ' · Slow ' + Math.round(st.slow * 100) + '% (area ' + st.area + ')' : ''}</small>
-      ${t.selling ? '<div class="row"><small>Selling…</small></div>' : mine ? `<div class="row"><button id="upBtn" ${up === null || m.gold < up ? 'disabled' : ''}>[U] Upgrade ${up === null ? 'MAX' : up + 'g'}</button><button id="sellBtn" class="${armed ? 'danger' : ''}">${armed ? 'Confirm sell?' : `[X] Sell ${sell}g`}</button></div>${busy ? `<small class="hint">Creeps on board: sale takes ${S.SELL_DELAY}s, tower stops firing</small>` : ''}` : ''}`;
+      ${!mine ? (t.selling ? '<div class="row"><small>Sale queued</small></div>' : '')
+        : t.selling ? `<div class="row"><small class="queued">💲 Sale queued (${sell}g) — sells when your board is clear</small></div><div class="row"><button id="sellBtn">[X] Cancel sale</button></div>`
+        : `<div class="row"><button id="upBtn" ${up === null || m.gold < up ? 'disabled' : ''}>[U] Upgrade ${up === null ? 'MAX' : up + 'g'}</button><button id="sellBtn" class="${armed ? 'danger' : ''}">${armed ? 'Confirm sell?' : `[X] Sell ${sell}g`}</button></div>${busy ? '<small class="hint">Creeps on board or a spawn is due: the sale is queued until your board is clear (the tower keeps firing)</small>' : ''}`}`;
     if (el.dataset.html !== html) {
       el.innerHTML = html; el.dataset.html = html;
       if ($('upBtn')) $('upBtn').onclick = doUpgrade; if ($('sellBtn')) $('sellBtn').onclick = doSell;
@@ -202,12 +235,16 @@
     el.classList.remove('hidden');
   }
   function doUpgrade() { if (selected) sendMsg({ t: 'upgrade', c: selected.c, r: selected.r }); }
-  // two-step sell: first press arms, second press within 2.5 s confirms
+  // two-step sell: first press arms, second press within 2.5 s confirms. On a queued sale one press cancels it.
   function doSell() {
     if (!selected) return;
+    const m = me(), t = m && towerAt(m.team, selected.c, selected.r);
+    if (t && t.selling) { if (t.owner === you) { sendMsg({ t: 'sell', c: t.c, r: t.r }); toast('Sale cancelled', true); } return; }
     const now = performance.now();
     if (sellArm && sellArm.c === selected.c && sellArm.r === selected.r && now < sellArm.until) {
-      sendMsg({ t: 'sell', c: selected.c, r: selected.r }); sellArm = null; selected = null;
+      const busy = state && m && state.boards[m.team].busy;
+      sendMsg({ t: 'sell', c: selected.c, r: selected.r }); sellArm = null;
+      if (busy) toast('Sale queued: it executes when your board is clear', true); else selected = null;
     } else { sellArm = { c: selected.c, r: selected.r, until: now + 2500 }; toast('Press X / Sell again to confirm', true); setTimeout(renderSel, 2600); }
     renderSel();
   }
@@ -238,7 +275,7 @@
     if (h.b !== m.team) { toast("That's the enemy side — build on your own maze"); return; }
     const t = towerAt(h.b, h.c, h.r);
     if (t) { selected = { c: h.c, r: h.r }; buildType = null; return; }
-    if (buildType) { sendMsg({ t: 'build', type: buildType, c: h.c, r: h.r }); if (!e.shiftKey && false) buildType = null; }
+    if (buildType) sendMsg({ t: 'build', type: buildType, c: h.c, r: h.r });
     else selected = null;
   });
   document.addEventListener('keydown', (e) => {
@@ -251,6 +288,7 @@
     if (!state) return;
     const k = e.key.toLowerCase();
     for (const [id, t] of Object.entries(S.TOWERS)) if (k === t.key) { buildType = buildType === id ? null : id; selected = null; }
+    if (e.repeat && (k === 'u' || k === 'x' || k === 'delete' || Object.values(S.SENDS).some((t) => t.key === k))) return; // held keys: no auto-repeat
     for (const [id, t] of Object.entries(S.SENDS)) if (k === t.key) sendMsg({ t: 'send', kind: id });
     if (k === 'u') doUpgrade();
     if (k === 'x' || k === 'delete') doSell();
@@ -264,11 +302,29 @@
     $('chatLog').appendChild(d); $('chatLog').scrollTop = 1e9;
   }
 
-  let toastTimer;
-  function toast(msg, info) {
-    const t = $('toast'); t.textContent = msg; t.className = 'show' + (info ? ' info' : '');
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.className = ''), 1800);
+  // toast queue: messages are shown one after another instead of overwriting each other.
+  // A toast with a key replaces a queued (or showing) toast with the same key, so bursts (e.g. enemy sends) coalesce.
+  const toastQ = []; let toastCur = null, toastTimer = null;
+  function toast(msg, info, key) {
+    const item = { msg, info: !!info, key: key || null };
+    if (key) {
+      if (toastCur && toastCur.key === key) { toastCur.msg = msg; paintToast(); return; }
+      const i = toastQ.findIndex((x) => x.key === key); if (i >= 0) { toastQ[i] = item; return; }
+    }
+    if (toastQ.length >= 4) { const i = toastQ.findIndex((x) => x.info); toastQ.splice(i >= 0 ? i : 0, 1); } // keep it short
+    toastQ.push(item);
+    if (!toastCur) nextToast();
   }
+  function toastHas(key) { return (toastCur && toastCur.key === key) || toastQ.some((x) => x.key === key); }
+  function paintToast() { const t = $('toast'); t.textContent = toastCur.msg; t.className = 'show' + (toastCur.info ? ' info' : ''); }
+  function nextToast() {
+    clearTimeout(toastTimer);
+    toastCur = toastQ.shift() || null;
+    if (!toastCur) { $('toast').className = ''; return; }
+    paintToast();
+    toastTimer = setTimeout(nextToast, toastQ.length ? 1100 : 1800);
+  }
+  window.__ftdToasts = () => ({ cur: toastCur && toastCur.msg, queued: toastQ.map((x) => x.msg) }); // read-only hook for the smoke test
 
   // ---------- rendering ----------
   function dists() {
@@ -349,7 +405,10 @@
       ctx.fillText('🏰', x0 + (S.BASE.c + 0.5) * CELL, TOP + (S.BASE.r + 0.5) * CELL + 5);
       ctx.fillText('🌀', x0 + (S.SPAWN.c + 0.5) * CELL, TOP + (S.SPAWN.r + 0.5) * CELL + 5);
       // towers
-      for (const t of B.towers) { const o = pmap.get(t[5]); drawTower(x0 + t[1] * CELL, TOP + t[2] * CELL, t[3], t[4], o ? o.color : '#888', t[6] ? 0.35 : 1); }
+      for (const t of B.towers) {
+        const o = pmap.get(t[5]); drawTower(x0 + t[1] * CELL, TOP + t[2] * CELL, t[3], t[4], o ? o.color : '#888', t[6] ? 0.6 : 1);
+        if (t[6]) { ctx.fillStyle = '#ffd166'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'right'; ctx.fillText('$', x0 + (t[1] + 1) * CELL - 3, TOP + t[2] * CELL + 12); } // sale queued
+      }
       // selected
       if (selected && m && m.team === b) {
         const t = towerAt(b, selected.c, selected.r);

@@ -25,15 +25,16 @@ function teamSizeOf(room) {
 }
 
 function newBoard() {
-  return { lives: S.LIVES, rawLives: S.LIVES, towers: new Map(), creeps: [], queue: [], dist: S.computeDist(() => false), leakFlash: 0, towerVer: 1 };
+  return { lives: S.LIVES, rawLives: S.LIVES, towers: new Map(), creeps: [], queue: [], sendAt: 0, dist: S.computeDist(() => false), leakFlash: 0, towerVer: 1 };
 }
 
 function createGame(room) {
   room.game = {
     time: 0, boards: { L: newBoard(), R: newBoard() }, nextIncome: S.INCOME_EVERY, nextWave: S.FIRST_WAVE, wave: 0,
     events: [], winner: null, winReason: null, nextCreepId: 1, nextTowerId: 1, teamSize: teamSizeOf(room), suddenDeath: false,
+    finishing: null, // { wave, fell: 'L'|'R'|'both' } once a base falls in sudden death: the current wave is played out, then lives lost decide
   };
-  for (const p of room.players.values()) { p.gold = S.START_GOLD; p.income = S.START_INCOME; p.sent = 0; p.kills = 0; p.ready = false; p.sendsThisWave = 0; p.sendIncome = 0; p.incomeFrac = 0; }
+  for (const p of room.players.values()) { p.gold = S.START_GOLD; p.income = S.START_INCOME; p.sent = 0; p.kills = 0; p.ready = false; p.sendIncome = 0; p.incomeFrac = 0; }
 }
 
 function recomputeDist(b) { b.dist = S.computeDist((c, r) => b.towers.has(key(c, r))); b.towerVer++; }
@@ -74,30 +75,31 @@ function queueWave(room) {
     for (let i = 0; i < count; i++) b.queue.push({ at: g.time + i * W.SPACING, kind: 'neutral', hp, speed: n % W.FAST_EVERY === 0 ? W.FAST_SPEED : W.SPEED, bounty: 1 + Math.floor(n / 3), leak: leakMult, radius: 0.24 });
     if (boss) b.queue.push({ at: g.time + count * W.SPACING + 0.5, kind: 'boss', hp: Math.round(hp * W.BOSS_HP_MULT), speed: W.BOSS_SPEED, bounty: 10 + n * 2, leak: W.BOSS_LEAK * leakMult, radius: 0.42 });
   }
-  for (const p of room.players.values()) p.sendsThisWave = 0;
   g.events.push({ k: 'wave', n, boss });
 }
 
 function doSend(room, p, kind) {
   const g = room.game;
   if (!S.hasSend(kind)) return 'Unknown send';
+  if (g.finishing) return 'Final wave: no more sends';
   const spec = S.SENDS[kind];
-  if (p.sendsThisWave >= S.SEND_CAP_PER_WAVE) return `Send limit reached (${S.SEND_CAP_PER_WAVE} per wave)`;
   if (p.gold < spec.cost) return 'Not enough gold';
-  addGold(p, -spec.cost); p.sent++; p.sendsThisWave++;
+  addGold(p, -spec.cost); p.sent++; // no per-wave cap: sends are limited only by gold
   // diminishing returns: the more income you already got from sends, the less each new send adds
   const gain = spec.income * S.SEND_INCOME_FALLOFF / (S.SEND_INCOME_FALLOFF + p.sendIncome) + p.incomeFrac;
   const whole = Math.floor(gain);
   p.incomeFrac = gain - whole; p.sendIncome += whole;
   addIncome(p, whole);
   const b = g.boards[other(p.team)];
-  const hp = S.sendHp(kind, g.wave);
-  const last = b.queue.reduce((m, q) => Math.max(m, q.at), g.time);
-  const start = Math.max(g.time, Math.min(last, g.time + 3)); // don't wait too long behind waves
+  const hp = S.sendHp(kind, g.wave, g.teamSize);
+  // Send lane: sends are unlimited, but each board has one entry lane and every send occupies it for spec.lane
+  // seconds, so a big banked dump trickles in over time instead of arriving all at once.
+  const start = Math.max(g.time, b.sendAt || 0);
+  b.sendAt = start + spec.lane * S.SEND_LANE_MULT;
   for (let i = 0; i < spec.count; i++) {
-    b.queue.push({ at: start + i * 0.25, kind, hp, speed: spec.speed, bounty: spec.bounty, leak: spec.leak * (g.suddenDeath ? S.WAVE.SUDDEN_DEATH_LEAK_MULT : 1), radius: spec.radius, from: p.id });
+    b.queue.push({ at: start + i * spec.gap, kind, hp, speed: spec.speed, bounty: spec.bounty, leak: spec.leak * (g.suddenDeath ? S.WAVE.SUDDEN_DEATH_LEAK_MULT : 1), radius: spec.radius, from: p.id });
   }
-  g.events.push({ k: 'send', team: p.team, kind, name: p.name, id: p.id, n: p.sendsThisWave });
+  g.events.push({ k: 'send', team: p.team, kind, name: p.name, id: p.id, n: p.sent });
   return null;
 }
 
@@ -119,13 +121,13 @@ function ownTower(room, p, c, r) {
   const t = room.game.boards[p.team].towers.get(key(c, r));
   if (!t) return { err: null };
   if (t.owner !== p.id) return { err: "That's your teammate's tower" };
-  if (t.sellAt !== null) return { err: 'That tower is being sold' };
   return { t };
 }
 
 function upgrade(room, p, c, r) {
   const { t, err } = ownTower(room, p, c, r);
   if (!t) return err;
+  if (t.sellAt !== null) return 'That tower is queued for sale (sell again to cancel)';
   const cost = S.upgradeCost(t.type, t.lvl);
   if (cost === null) return 'Already max level';
   if (p.gold < cost) return 'Not enough gold';
@@ -140,11 +142,20 @@ function finishSell(room, b, t) {
   recomputeDist(b);
 }
 
+// A board is busy while creeps are on it or a spawn is due within SELL_SPAWN_GUARD seconds.
+// Sales on a busy board are queued and execute the moment it is clear, so the path can never change
+// under live creeps by removing a tower (this is what stops sell/rebuild "juggling").
+function boardBusy(g, b) {
+  return b.creeps.length > 0 || b.queue.some((q) => q.at <= g.time + S.SELL_SPAWN_GUARD);
+}
+
+// sell = sell now if the board is clear, otherwise queue the sale; selling a queued tower again cancels the sale
 function sell(room, p, c, r) {
   const { t, err } = ownTower(room, p, c, r);
   if (!t) return err;
-  const b = room.game.boards[p.team];
-  if (b.creeps.length || b.queue.some((q) => q.at <= room.game.time + S.SELL_DELAY)) { t.sellAt = room.game.time + S.SELL_DELAY; b.towerVer++; }
+  const g = room.game, b = g.boards[p.team];
+  if (t.sellAt !== null) { t.sellAt = null; b.towerVer++; return null; }
+  if (boardBusy(g, b)) { t.sellAt = g.time; b.towerVer++; }
   else finishSell(room, b, t);
   return null;
 }
@@ -172,8 +183,8 @@ function stepBoard(room, team) {
     b.queue.sort((a, c) => a.at - c.at);
     while (b.queue.length && b.queue[0].at <= g.time) spawnCreep(g, b, b.queue.shift());
   }
-  // delayed sells
-  for (const t of [...b.towers.values()]) if (t.sellAt !== null && g.time >= t.sellAt) finishSell(room, b, t);
+  // queued sells execute as soon as the board is clear
+  if (!boardBusy(g, b)) for (const t of [...b.towers.values()]) if (t.sellAt !== null) finishSell(room, b, t);
   // move creeps
   const survivors = [];
   for (const cr of b.creeps) {
@@ -203,8 +214,7 @@ function stepBoard(room, team) {
   if (b.leakFlash > 0) b.leakFlash -= DT;
   // towers fire
   for (const t of b.towers.values()) {
-    if (t.sellAt !== null) continue;
-    t.cd -= DT;
+    t.cd -= DT; // towers queued for sale keep firing until the sale executes
     if (t.cd > 0) continue;
     const st = S.TOWERS[t.type].levels[t.lvl];
     const tx = t.c + 0.5, ty = t.r + 0.5;
@@ -244,27 +254,44 @@ function stepGame(room) {
     g.events.push({ k: 'income' });
   }
   g.nextWave -= DT;
-  if (g.nextWave <= 0) { g.nextWave += S.WAVE_EVERY; queueWave(room); }
+  if (g.nextWave <= 0 && !g.finishing) { g.nextWave += S.WAVE_EVERY; queueWave(room); }
   stepBoard(room, 'L');
   stepBoard(room, 'R');
   for (const p of room.players.values()) {
     if (!Number.isFinite(p.gold) || !Number.isFinite(p.income)) throw new Error(`non-finite economy for player ${p.id}`);
   }
   const L = g.boards.L, R = g.boards.R;
+  if (g.finishing) {
+    // sudden death: play out the wave in which a base fell (no new wave starts), then compare lives lost
+    const clear = !L.creeps.length && !R.creeps.length && !L.queue.length && !R.queue.length;
+    if (clear || g.nextWave <= DT / 2) { decide(room, 'Sudden death: '); return true; }
+    return false;
+  }
   if (L.lives <= 0 || R.lives <= 0) {
-    if (L.lives <= 0 && R.lives <= 0) {
-      // tiebreak: fewer lives lost (overkill), then more kills, else draw
-      if (L.rawLives !== R.rawLives) { g.winner = L.rawLives > R.rawLives ? 'L' : 'R'; g.winReason = 'Tiebreak: fewer lives lost'; }
-      else {
-        const kl = teamKills(room, 'L'), kr = teamKills(room, 'R');
-        if (kl !== kr) { g.winner = kl > kr ? 'L' : 'R'; g.winReason = 'Tiebreak: more kills'; }
-        else g.winner = 'draw';
-      }
-    } else g.winner = L.lives <= 0 ? 'R' : 'L';
+    const fell = L.lives <= 0 && R.lives <= 0 ? 'both' : L.lives <= 0 ? 'L' : 'R';
+    if (g.suddenDeath) {
+      g.finishing = { wave: g.wave, fell };
+      g.events.push({ k: 'finishing', fell, wave: g.wave });
+      return false;
+    }
+    if (fell === 'both') decide(room, 'Tiebreak: ');
+    else g.winner = fell === 'L' ? 'R' : 'L';
     room.phase = 'over';
     return true;
   }
   return false;
 }
 
-module.exports = { TICK, DT, key, other, createGame, stepGame, build, upgrade, sell, doSend, canBuild, teamSizeOf, addGold, addIncome };
+// winner by total lives lost (overkill counts: rawLives goes below 0), then kills, else draw
+function decide(room, prefix) {
+  const g = room.game, L = g.boards.L, R = g.boards.R;
+  if (L.rawLives !== R.rawLives) { g.winner = L.rawLives > R.rawLives ? 'L' : 'R'; g.winReason = `${prefix}fewer lives lost (${S.LIVES - L.rawLives} vs ${S.LIVES - R.rawLives})`; }
+  else {
+    const kl = teamKills(room, 'L'), kr = teamKills(room, 'R');
+    if (kl !== kr) { g.winner = kl > kr ? 'L' : 'R'; g.winReason = `${prefix}equal lives lost, more kills (${kl} vs ${kr})`; }
+    else { g.winner = 'draw'; g.winReason = `${prefix}equal lives lost and kills`; }
+  }
+  room.phase = 'over';
+}
+
+module.exports = { TICK, DT, key, other, createGame, stepGame, build, upgrade, sell, doSend, canBuild, teamSizeOf, addGold, addIncome, boardBusy };

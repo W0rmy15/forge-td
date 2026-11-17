@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.3.0 — 2026-11-16
+
+Fixes from the v0.2 QA re-review, a balance pass based on the reviewer's tested "V7" tuning, and unlimited sends.
+
+### Gameplay / rules
+- **Sell-juggling fixed:** a sale on a busy board (creeps on it, or a spawn due within 2 s) is queued and executes
+  the moment the board is clear. The tower keeps firing until then; selling it again cancels. Removing a tower can
+  no longer change the path under live creeps. The reviewer's `juggle.js` now gets 0 flips and identical
+  leaks/time-on-board with and without juggling (it was 193 reversals and 0 leaks for 190 gold in v0.2).
+- **Sends are unlimited** (the 6-per-player-per-wave cap is gone; gold is the only limit). To keep banked dumps from
+  winning early, each enemy board has one send lane: a send occupies it for 0.9 s (Runner), 2.25 s (Swarm) or 3 s (Brute),
+  so a big dump trickles in.
+- Sudden death from wave 22 with ×1.25 extra HP per wave and normal leak cost (was wave 24, ×1.45, double leaks).
+  When a base falls in sudden death, the current wave is played out (no new sends), then fewer total lives lost
+  (overkill counts) wins, then more kills; a draw only if both are identical.
+
+### Balance (all in `public/shared.js`)
+- Team scaling = team size: 2v2 waves ×2 (was ×1.5), and sends are now scaled by team size too.
+- Send HP ×wave HP: Runner 1.8, Swarm 0.75, Brute 9. Defender bounty: Runner 9, Swarm 3, Brute 18.
+- Send income falloff 120 (was 150).
+- New early-game send ramp: send HP ×0.26 at wave 1 rising to ×1 at wave 14 (bots showed 60% send rushes winning 2v2 in 3.4–3.7 min without it).
+
+### Network / server
+- Seat takeover (second tab): the old socket gets `err` code `replaced` and is closed with 4001 `replaced`; the
+  client goes to the menu with a message and does not reconnect (no more ping-pong).
+- Join errors carry code `joinfail` (game in progress, room full); the client treats any join failure like
+  "room not found": stop retrying, back to the menu with the message.
+- Per-IP cap uses the socket address unless `TRUST_PROXY` is set; then `CF-Connecting-IP` > `True-Client-IP` > last
+  `X-Forwarded-For` hop. `render.yaml` sets `TRUST_PROXY=1`.
+- State snapshots include a per-board `busy` flag (same rule the server uses for queued sales) and `fin` (final wave).
+
+### Client
+- Held keys no longer auto-repeat sends, upgrades or sells (`e.repeat` ignored).
+- Permanent HUD banner: "sudden death soon" from wave 19, sudden death, and the final-wave tiebreak.
+- Toast queue: toasts no longer overwrite each other; enemy sends coalesce into one "Incoming enemy sends: …" toast.
+- Sale queued UI: 💲 marker on the tower, "Sale queued" panel with Cancel, and the sell hint follows the server's busy flag.
+- Removed the sends-this-wave counter (no cap any more); queued-send counts and send feedback stay.
+- Removed dead code in the build click handler.
+
+### Tests
+- New: `test/sim.js` (in-process rule checks), `test/v03.js` (takeover, join codes, proxy headers, queued sale over
+  the wire), `test/matrix.js` (send-vs-defense matrix incl. "bank and dump" senders, lives lost before sudden death),
+  `test/smoke.js` (headless-Chrome smoke test, needs puppeteer-core). `test/balance.js` bots gained a `burst` mode.
+
 ## 0.2.0 — 2026-11-16
 
 Fixes from the v0.1 QA review, plus a balance pass.

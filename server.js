@@ -92,7 +92,7 @@ function addPlayer(room, ws, name) {
   const team = teamCount(room, 'L') <= teamCount(room, 'R') ? 'L' : 'R';
   const usedColors = new Set([...room.players.values()].map((p) => p.color));
   const color = PLAYER_COLORS.find((c) => !usedColors.has(c)) || PLAYER_COLORS[0];
-  const p = { id, token: crypto.randomBytes(12).toString('hex'), name, team, ready: false, ws, connected: true, color, gold: 0, income: 0, cursor: null, sent: 0, kills: 0, sendsThisWave: 0, sendIncome: 0, incomeFrac: 0 };
+  const p = { id, token: crypto.randomBytes(12).toString('hex'), name, team, ready: false, ws, connected: true, color, gold: 0, income: 0, cursor: null, sent: 0, kills: 0, sendIncome: 0, incomeFrac: 0 };
   room.players.set(id, p);
   ensureHost(room);
   return p;
@@ -119,7 +119,7 @@ function boardsMsg(room, full) {
   for (const t of ['L', 'R']) {
     const b = g.boards[t];
     const o = {
-      lives: b.lives, leak: b.leakFlash > 0 ? 1 : 0, tv: b.towerVer,
+      lives: b.lives, leak: b.leakFlash > 0 ? 1 : 0, tv: b.towerVer, busy: G.boardBusy(g, b) ? 1 : 0, // busy = sales are queued (same rule as the server)
       creeps: b.creeps.map((c) => [c.id, c.kind, +c.x.toFixed(2), +c.y.toFixed(2), Math.ceil(c.hp), c.maxHp, g.time < c.slowUntil ? 1 : 0, c.radius]),
       queued: b.queue.length, queuedSends: b.queue.reduce((n, q) => n + (q.from ? 1 : 0), 0),
     };
@@ -133,7 +133,7 @@ function boardsMsg(room, full) {
 function playersFor(room, team) {
   return [...room.players.values()].map((p) => {
     const o = { id: p.id, name: p.name, team: p.team, income: p.income, color: p.color, cursor: p.cursor, connected: p.connected, sent: p.sent, kills: p.kills };
-    if (p.team === team || room.phase === 'over') { o.gold = Math.floor(p.gold); o.sw = p.sendsThisWave; }
+    if (p.team === team || room.phase === 'over') { o.gold = Math.floor(p.gold); }
     return o;
   });
 }
@@ -141,7 +141,7 @@ function stateFor(room, team, boards) {
   const g = room.game;
   return JSON.stringify({
     t: 's', phase: room.phase, time: +g.time.toFixed(2), wave: g.wave, nextIncome: +g.nextIncome.toFixed(1), nextWave: +g.nextWave.toFixed(1),
-    winner: g.winner, winReason: g.winReason, sd: g.suddenDeath ? 1 : 0, teamSize: g.teamSize,
+    winner: g.winner, winReason: g.winReason, sd: g.suddenDeath ? 1 : 0, fin: g.finishing, teamSize: g.teamSize,
     boards, ev: g.events, players: playersFor(room, team),
   });
 }
@@ -185,7 +185,11 @@ function handle(ws, msg) {
       if (typeof msg.token === 'string' && msg.token) {
         for (const ep of r.players.values()) {
           if (ep.token === msg.token) {
-            if (ep.ws && ep.ws !== ws) { const old = ep.ws; ep.ws = null; old.playerId = null; old.roomCode = null; try { old.close(); } catch (e) {} }
+            if (ep.ws && ep.ws !== ws) { // seat opened elsewhere (e.g. a second tab): tell the old socket why, and it must not reconnect
+              const old = ep.ws; ep.ws = null; old.playerId = null; old.roomCode = null;
+              send(old, { t: 'err', code: 'replaced', msg: 'This seat was opened in another tab or window.' });
+              try { old.close(4001, 'replaced'); } catch (e) {}
+            }
             ep.ws = ws; ep.connected = true; if (msg.name) ep.name = cleanName(msg.name);
             ws.roomCode = code; ws.playerId = ep.id; r.emptySince = null;
             ensureHost(r);
@@ -196,8 +200,8 @@ function handle(ws, msg) {
           }
         }
       }
-      if (r.phase !== 'lobby') return send(ws, { t: 'err', msg: 'Game already in progress' });
-      if (r.players.size >= S.MAX_PER_TEAM * 2) return send(ws, { t: 'err', msg: 'Room is full' });
+      if (r.phase !== 'lobby') return send(ws, { t: 'err', code: 'joinfail', msg: 'Game already in progress' });
+      if (r.players.size >= S.MAX_PER_TEAM * 2) return send(ws, { t: 'err', code: 'joinfail', msg: 'Room is full' });
       const np = addPlayer(r, ws, cleanName(msg.name));
       ws.roomCode = code; ws.playerId = np.id; r.emptySince = null;
       send(ws, { t: 'joined', code, you: np.id, token: np.token });
@@ -287,16 +291,21 @@ function take(b, rate, burst) {
   b.tokens -= 1; return true;
 }
 
+// Per-IP limits key on the socket address. Proxy headers can be forged by any client, so they are only
+// trusted when TRUST_PROXY is set (e.g. on Render, behind Cloudflare): then CF-Connecting-IP, True-Client-IP,
+// or the last X-Forwarded-For hop (the one appended by the proxy) is used.
+const TRUST_PROXY = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY || '');
 function clientIp(req) {
-  // Prefer headers set by the edge proxy (Cloudflare/Render); client-supplied XFF first values can be forged.
-  const h = req.headers;
-  for (const k of ['cf-connecting-ip', 'true-client-ip']) {
-    if (typeof h[k] === 'string' && h[k].trim()) return h[k].trim();
-  }
-  const xf = h['x-forwarded-for'];
-  if (typeof xf === 'string' && xf.trim()) {
-    const parts = xf.split(',').map(x => x.trim()).filter(Boolean);
-    if (parts.length) return parts[parts.length - 1]; // last hop appended by the trusted proxy
+  if (TRUST_PROXY) {
+    const h = req.headers;
+    for (const k of ['cf-connecting-ip', 'true-client-ip']) {
+      if (typeof h[k] === 'string' && h[k].trim()) return h[k].trim();
+    }
+    const xf = h['x-forwarded-for'];
+    if (typeof xf === 'string' && xf.trim()) {
+      const parts = xf.split(',').map((x) => x.trim()).filter(Boolean);
+      if (parts.length) return parts[parts.length - 1];
+    }
   }
   return req.socket.remoteAddress || '?';
 }
@@ -363,4 +372,4 @@ setInterval(() => {
 }, 15000);
 
 process.on('uncaughtException', (e) => logOnce('uncaught:' + (e && e.message), 'UNCAUGHT ' + (e.stack || e)));
-server.listen(PORT, () => log(`Forge TD v${S.VERSION} listening on http://localhost:${PORT}${SPEED > 1 ? ` (SPEED=${SPEED}, testing only)` : ''}`));
+server.listen(PORT, () => log(`Forge TD v${S.VERSION} listening on http://localhost:${PORT}${TRUST_PROXY ? ' (TRUST_PROXY on)' : ''}${SPEED > 1 ? ` (SPEED=${SPEED}, testing only)` : ''}`));
