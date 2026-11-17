@@ -12,15 +12,31 @@
   let buildType = null, selected = null, hover = null; // hover: {b,c,r,fx,fy}
   let overPainted = '';
 
+  function aud(name, opts) { try { window.audio && audio.play(name, opts); } catch (e) {} }
+  (function setupAudioUi() {
+    const muteBtn = $('muteBtn'), slider = $('volSlider');
+    if (!muteBtn || !slider) return;
+    const paint = () => {
+      if (!window.audio) return;
+      slider.value = Math.round(audio.getVolume() * 100);
+      muteBtn.textContent = audio.isMuted() ? '🔇' : '🔊';
+      muteBtn.setAttribute('aria-pressed', audio.isMuted() ? 'true' : 'false');
+    };
+    muteBtn.onclick = () => { try { window.audio && (audio.unlock(), audio.toggleMute()); } catch (e) {} aud('ui_click'); paint(); };
+    slider.oninput = () => { try { window.audio && (audio.unlock(), audio.setVolume(+slider.value / 100)); } catch (e) {} paint(); };
+    paint();
+  })();
+
   // ---------- menu ----------
   $('name').value = localStorage.getItem('ftd_name') || '';
   const params = new URLSearchParams(location.search);
   if (params.get('room')) $('codeInput').value = params.get('room').toUpperCase();
   const nameVal = () => { const n = $('name').value.trim() || 'Player'; localStorage.setItem('ftd_name', n); return n; };
-  $('createBtn').onclick = () => { stopRetry(); connect(() => sendMsg({ t: 'create', name: nameVal() })); };
+  $('createBtn').onclick = () => { aud('ui_click'); stopRetry(); connect(() => sendMsg({ t: 'create', name: nameVal() })); };
   $('joinBtn').onclick = () => {
     const c = $('codeInput').value.trim().toUpperCase();
-    if (c.length !== 4) return ($('menuErr').textContent = 'Enter a 4-letter room code');
+    if (c.length !== 4) { aud('ui_error'); return ($('menuErr').textContent = 'Enter a 4-letter room code'); }
+    aud('ui_click');
     stopRetry();
     connect(() => sendMsg({ t: 'join', code: c, name: nameVal(), token: localStorage.getItem('ftd_token_' + c) }));
   };
@@ -82,6 +98,7 @@
       prevState = state; state = m; stateAt = performance.now(); buildPrev(); trackHits(m); onState(m);
     }
     else if (m.t === 'err') {
+      aud('ui_error');
       if (/^Lane full/.test(m.msg || '')) toast(m.msg, false, 'lanefull', true); // jumps ahead of 'Sent' toasts, never stacks
       else toast(m.msg, false, null, true);
       if (m.code === 'replaced') replaced();
@@ -94,11 +111,11 @@
   }
 
   // ---------- lobby ----------
-  $('copyBtn').onclick = () => { $('shareLink').select(); navigator.clipboard && navigator.clipboard.writeText($('shareLink').value); toast('Link copied', true); };
-  document.querySelectorAll('.teamBtn').forEach((b) => (b.onclick = () => sendMsg({ t: 'team', team: b.dataset.team })));
-  $('readyBtn').onclick = () => { const me = lobby.players.find((p) => p.id === you); sendMsg({ t: 'ready', ready: !(me && me.ready) }); };
-  $('startBtn').onclick = () => sendMsg({ t: 'start' });
-  $('backBtn').onclick = () => sendMsg({ t: 'lobby' });
+  $('copyBtn').onclick = () => { aud('ui_click'); $('shareLink').select(); navigator.clipboard && navigator.clipboard.writeText($('shareLink').value); toast('Link copied', true); };
+  document.querySelectorAll('.teamBtn').forEach((b) => (b.onclick = () => { aud('ui_click'); sendMsg({ t: 'team', team: b.dataset.team }); }));
+  $('readyBtn').onclick = () => { aud('ui_click'); const me = lobby.players.find((p) => p.id === you); sendMsg({ t: 'ready', ready: !(me && me.ready) }); };
+  $('startBtn').onclick = () => { aud('ui_click'); sendMsg({ t: 'start' }); };
+  $('backBtn').onclick = () => { aud('ui_click'); sendMsg({ t: 'lobby' }); };
 
   function show(id) { for (const s of ['menu', 'lobby', 'game']) $(s).classList.toggle('hidden', s !== id); }
   function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -141,7 +158,7 @@
     const b = document.createElement('button');
     b.className = 'tbtn t-' + k;
     b.innerHTML = `<img src="${towerIcon(k)}" alt=""><span class="nm"><span class="k">${t.key}</span> ${t.name}</span><span class="cost">${t.cost}g</span>`; b.title = t.desc;
-    b.onclick = () => { buildType = buildType === k ? null : k; selected = null; };
+    b.onclick = () => { aud('ui_click'); buildType = buildType === k ? null : k; selected = null; };
     $('buildBtns').appendChild(b); buildBtns[k] = b;
   }
   const rampFull = S.sendRampFullWave();
@@ -153,9 +170,9 @@
   for (const [k, t] of Object.entries(S.SENDS)) {
     const col = document.createElement('div'); col.className = 'scol';
     const b = document.createElement('button'); b.className = 'sbtn s-' + k;
-    b.onclick = () => sendMsg({ t: 'send', kind: k });
+    b.onclick = () => { aud('ui_click'); sendMsg({ t: 'send', kind: k }); };
     const u = document.createElement('button'); u.className = 'ubtn';
-    u.onclick = () => sendMsg({ t: 'sendup', kind: k });
+    u.onclick = () => { aud('ui_click'); sendMsg({ t: 'sendup', kind: k }); };
     col.appendChild(b); col.appendChild(u); $('sendBtns').appendChild(col); sendBtns[k] = b; upBtns[k] = u;
   }
   let sendSig = '';
@@ -208,8 +225,18 @@
     // selection panel
     renderSel();
     renderBanner(s, m);
+    audTowerDiff(s, prevState);
     // effects from events
-    for (const e of s.ev) {
+    for (const e of (s.ev || [])) {
+      if (e.k === 'shot') aud('shot_' + e.tt, { board: e.b, x: e.x1 });
+      else if (e.k === 'kill') aud('kill', { kind: e.kind, board: e.b, x: e.x });
+      else if (e.k === 'leak') aud(e.team === m.team ? 'life_loss' : 'leak', { board: e.team });
+      else if (e.k === 'send') aud('send', { kind: e.kind, tier: e.tier, board: e.team === 'L' ? 'R' : 'L' });
+      else if (e.k === 'sendup') aud('sendup', { kind: e.kind, tier: e.tier });
+      else if (e.k === 'wave') aud('wave', { boss: e.boss });
+      else if (e.k === 'sudden') aud('sudden');
+      else if (e.k === 'finishing') aud('finishing');
+      else if (e.k === 'income') aud('income', { volume: 0.45 });
       if (e.k === 'shot' || e.k === 'boom' || e.k === 'chill' || e.k === 'kill') fxEvent(e);
       else if (e.k === 'leak') fxEvent(e);
       else if (e.k === 'sendup') {
@@ -233,6 +260,7 @@
       $('overStats').innerHTML = s.players.map((p) => `<div class="ostat"><span class="dot" style="background:${p.color}"></span><b>${esc(p.name)}</b> <em>${p.team === 'L' ? 'Left' : 'Right'}</em><span class="os">⚔ ${p.kills}</span><span class="os">➤ ${p.sent}</span><span class="os">+${p.income}g</span></div>`).join('');
       if (overPainted !== kind) {
         overPainted = kind;
+        aud(kind === 'win' ? 'win' : kind === 'lose' ? 'lose' : 'draw');
         const oc = $('overArt');
         if (oc && window.ART) {
           const md = Math.min(2, window.devicePixelRatio || 1), W = 420, H = 130;
@@ -266,6 +294,22 @@
   function flashBtn(b) { if (!b) return; b.classList.add('flash'); setTimeout(() => b.classList.remove('flash'), 250); }
   function towerAt(b, c, r) { if (!state) return null; const t = state.boards[b].towers.find((t) => t[1] === c && t[2] === r); return t ? { id: t[0], c: t[1], r: t[2], type: t[3], lvl: t[4], owner: t[5], selling: !!t[6] } : null; }
 
+  function audTowerDiff(s, prev) {
+    if (!prev || !s || !s.boards) return;
+    for (const b of ['L', 'R']) {
+      const cur = s.boards[b] && s.boards[b].towers, old = prev.boards[b] && prev.boards[b].towers;
+      if (!cur || !old || cur === old) continue; // same array ref ⇒ towers unchanged this tick
+      const prevMap = new Map(old.map((t) => [t[0], t]));
+      const seen = new Set();
+      for (const t of cur) {
+        seen.add(t[0]);
+        const p = prevMap.get(t[0]);
+        if (!p) aud('place', { board: b, x: t[1] + 0.5 });
+        else if (t[4] > p[4]) aud('upgrade', { board: b, x: t[1] + 0.5 });
+      }
+      for (const t of old) if (!seen.has(t[0])) aud('sell', { board: b, x: t[1] + 0.5 });
+    }
+  }
   function renderSel() {
     const m = me();
     const el = $('sel');
@@ -290,10 +334,11 @@
     }
     el.classList.remove('hidden');
   }
-  function doUpgrade() { if (selected) sendMsg({ t: 'upgrade', c: selected.c, r: selected.r }); }
+  function doUpgrade() { if (selected) { aud('ui_click'); sendMsg({ t: 'upgrade', c: selected.c, r: selected.r }); } }
   // two-step sell: first press arms, second press within 2.5 s confirms. On a queued sale one press cancels it.
   function doSell() {
     if (!selected) return;
+    aud('ui_click');
     const m = me(), t = m && towerAt(m.team, selected.c, selected.r);
     if (t && t.selling) { if (t.owner === you) { sendMsg({ t: 'sell', c: t.c, r: t.r }); toast('Sale cancelled', true); } return; }
     const now = performance.now();
@@ -328,9 +373,9 @@
     if (e.button !== 0 || !state) return;
     const h = cellFromEvent(e), m = me();
     if (!h || !m) return;
-    if (h.b !== m.team) { toast("That's the enemy side — build on your own maze"); return; }
+    if (h.b !== m.team) { aud('ui_error'); toast("That's the enemy side — build on your own maze"); return; }
     const t = towerAt(h.b, h.c, h.r);
-    if (t) { selected = { c: h.c, r: h.r }; buildType = null; return; }
+    if (t) { aud('ui_click'); selected = { c: h.c, r: h.r }; buildType = null; return; }
     if (buildType) sendMsg({ t: 'build', type: buildType, c: h.c, r: h.r });
     else selected = null;
   });
@@ -576,7 +621,7 @@
     for (const b of ['L', 'R']) for (const cr of s.boards[b].creeps) {
       const h = hpSeen.get(cr[0]);
       if (!h) hpSeen.set(cr[0], { hp: cr[4], hit: 0, gen: hpGen });
-      else { if (cr[4] < h.hp) h.hit = now; h.hp = cr[4]; h.gen = hpGen; }
+      else { if (cr[4] < h.hp) { h.hit = now; aud('hit', { board: b, x: cr[2] }); } h.hp = cr[4]; h.gen = hpGen; }
     }
     if (hpGen % 40 === 0) for (const [id, h] of hpSeen) if (h.gen !== hpGen) hpSeen.delete(id);
   }
