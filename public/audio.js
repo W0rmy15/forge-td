@@ -7,6 +7,8 @@
 
   var LS_VOL = 'forgetd.volume';
   var LS_MUTE = 'forgetd.muted';
+  var LS_MVOL = 'forgetd.musicVolume';
+  var LS_MMUTE = 'forgetd.musicMuted';
   var GLOBAL_CAP = 22;
   var AC = (typeof root !== 'undefined' && (root.AudioContext || root.webkitAudioContext)) ||
            (typeof AudioContext !== 'undefined' && AudioContext) ||
@@ -14,8 +16,13 @@
            null;
 
   var ctx = null, master = null, limiter = null;
+  var musicGain = null, duckGain = null, fadeGain = null, pad = null;
   var unlocked = false, attaching = false;
   var volume = 0.7, muted = false;
+  var musicVolume = 0.35, musicMuted = false;
+  var musicOn = false, musicFading = false, musicScene = 'match', musicWanted = null;
+  var musicLevel = 0, musicStep = 0, musicNext = 0, musicTimer = 0, musicHidden = false;
+  var musicLive = 0, musicPeak = 0;
   var lastAt = Object.create(null);
   var counts = Object.create(null);
   var active = [];
@@ -36,6 +43,9 @@
     var sv = parseFloat(root.localStorage && root.localStorage.getItem(LS_VOL));
     if (isFinite(sv)) volume = clamp(sv, 0, 1);
     muted = !!(root.localStorage && root.localStorage.getItem(LS_MUTE) === '1');
+    var mv = parseFloat(root.localStorage && root.localStorage.getItem(LS_MVOL));
+    if (isFinite(mv)) musicVolume = clamp(mv, 0, 1);
+    musicMuted = !!(root.localStorage && root.localStorage.getItem(LS_MMUTE) === '1');
   } catch (e) { /* private mode / no storage */ }
 
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
@@ -46,6 +56,8 @@
       if (!root.localStorage) return;
       root.localStorage.setItem(LS_VOL, String(volume));
       root.localStorage.setItem(LS_MUTE, muted ? '1' : '0');
+      root.localStorage.setItem(LS_MVOL, String(musicVolume));
+      root.localStorage.setItem(LS_MMUTE, musicMuted ? '1' : '0');
     } catch (e) { /* ignore */ }
   }
 
@@ -53,6 +65,14 @@
     if (!master || !ctx) return;
     var v = muted ? 0 : volume;
     master.gain.setTargetAtTime(v, ctx.currentTime, 0.02);
+    applyMusicGain();
+  }
+
+  function later(fn, ms) {
+    try { return ((root && root.setTimeout) || setTimeout)(fn, Math.max(0, ms || 0)); } catch (e) { return 0; }
+  }
+  function cancelLater(id) {
+    try { if (id) ((root && root.clearTimeout) || clearTimeout)(id); } catch (e) {}
   }
 
   function supported() { return typeof AC === 'function'; }
@@ -77,6 +97,7 @@
     limiter.connect(ctx.destination);
     // Build looping noise once on unlock so a play never allocates a long buffer mid-frame.
     noiseBuffer('white'); noiseBuffer('pink'); noiseBuffer('brown');
+    ensureMusicGraph();
   }
 
   function unlock() {
@@ -84,11 +105,18 @@
       if (!supported()) return;
       if (!ctx) createGraph();
       if (!ctx) return;
+      var kickMusic = function () {
+        if (ctx.state === 'running' && musicWanted && !musicOn) musicStart(musicWanted);
+      };
       if (ctx.state === 'suspended' && ctx.resume) {
-        ctx.resume().then(function () { unlocked = ctx.state === 'running'; }).catch(function () {});
+        ctx.resume().then(function () {
+          unlocked = ctx.state === 'running';
+          kickMusic();
+        }).catch(function () {});
       }
       unlocked = ctx.state === 'running' || ctx.state === 'suspended';
       if (ctx.state === 'running') unlocked = true;
+      kickMusic();
     });
   }
 
@@ -105,6 +133,7 @@
     for (var i = 0; i < evs.length; i++) target.addEventListener(evs[i], once, true);
   }
   safe(attachUnlock);
+  safe(attachMusicVis);
   safe(startRafWatch);
 
   // Frame-time watch: EMA of rAF deltas, ignoring hidden tabs and tab-switch gaps.
@@ -150,8 +179,10 @@
       var now = ts;
       if (!lagging && (emaMs > emaEnter || longStreak >= 3)) {
         lagging = true; goodStreak = 0; lagUntil = now + 500;
+        musicApplyCheap();
       } else if (lagging && now > lagUntil && goodStreak >= 24 && emaMs < emaExit) {
         lagging = false;
+        musicApplyCheap();
       }
     };
     raf(loop);
@@ -803,15 +834,227 @@
     return name;
   }
 
+
+  // Procedural forge BGM: 108 BPM workshop groove, lookahead scheduler (~25/100 ms).
+  var BASS_PAT = [43,0,43,50,0,43,41,38,43,0,41,38,43,0,50,0];
+  var TUNE_A = [67,69,71,74,71,69,67,62,67,69,71,69,67,0,62,0];
+  var TUNE_B = [67,71,74,76,74,71,69,67,64,67,69,71,67,0,62,64];
+  function midiHz(n) { return 440 * Math.pow(2, (n - 69) / 12); }
+  function musicCheap() { return stressed(); }
+  function musicBpm() {
+    var b = musicScene === 'lobby' ? 96 : 108;
+    if (musicLevel >= 1) b *= 1.12;
+    if (musicLevel >= 2) b *= 1.05;
+    return b;
+  }
+  function stepDur() { return 30 / musicBpm(); }
+  function musicAudible() { return (muted || musicMuted) ? 0 : musicVolume; }
+  function applyMusicGain() {
+    if (musicGain && ctx) try { musicGain.gain.setTargetAtTime(musicAudible(), ctx.currentTime, 0.03); } catch (e) {}
+  }
+  function musicStats() {
+    return {
+      playing: !!musicOn, fading: !!musicFading, scene: musicOn ? musicScene : null,
+      level: musicLevel, bpm: +musicBpm().toFixed(2), cheap: !!musicCheap(),
+      layers: !musicOn ? 'off' : (musicScene === 'lobby' ? 'lobby' : (musicCheap() ? 'min' : 'full')),
+      live: musicLive, peak: musicPeak, volume: musicVolume, muted: !!musicMuted
+    };
+  }
+  function isHidden() { try { return !!(root.document && root.document.hidden); } catch (e) { return false; } }
+  function attachMusicVis() {
+    var d = root.document;
+    if (!d || !d.addEventListener) return;
+    d.addEventListener('visibilitychange', function () {
+      safe(function () {
+        if (isHidden()) {
+          musicHidden = true;
+          if (musicTimer) { cancelLater(musicTimer); musicTimer = 0; }
+        } else {
+          musicHidden = false;
+          if (musicOn && ctx) { musicNext = ctx.currentTime + 0.05; musicPump(); }
+        }
+      });
+    });
+  }
+  function ensureMusicGraph() {
+    if (!ctx || musicGain) return;
+    fadeGain = ctx.createGain(); fadeGain.gain.value = 0;
+    duckGain = ctx.createGain(); duckGain.gain.value = 1;
+    musicGain = ctx.createGain(); musicGain.gain.value = musicAudible();
+    fadeGain.connect(duckGain); duckGain.connect(musicGain); musicGain.connect(limiter);
+  }
+  function trackLive(n, tEnd) {
+    musicLive += n;
+    if (musicLive > musicPeak) musicPeak = musicLive;
+    later(function () { musicLive = Math.max(0, musicLive - n); }, Math.max(0, (tEnd - (ctx ? ctx.currentTime : 0)) * 1000 + 8));
+  }
+  function mOsc(type, freq, dest, t0, dur, peak, endHz) {
+    var o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.value = freq;
+    var g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    if (endHz) try { o.frequency.setValueAtTime(freq, t0); o.frequency.exponentialRampToValueAtTime(endHz, t0 + dur * 0.85); } catch (e) {}
+    o.connect(g); g.connect(dest);
+    o.start(t0); o.stop(t0 + dur + 0.01);
+    trackLive(1, t0 + dur + 0.02);
+  }
+  function ensurePad() {
+    if (pad || !ctx || !fadeGain) return;
+    var g = ctx.createGain(); g.gain.value = 0; g.connect(fadeGain);
+    var lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 280; lp.Q.value = 0.5; lp.connect(g);
+    var o1 = ctx.createOscillator(); o1.type = 'triangle'; o1.frequency.value = midiHz(43);
+    var o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.value = midiHz(50);
+    var g1 = ctx.createGain(); g1.gain.value = 0.45;
+    var g2 = ctx.createGain(); g2.gain.value = 0.3;
+    o1.connect(g1); g1.connect(lp); o2.connect(g2); g2.connect(lp);
+    var ns = ctx.createBufferSource(); ns.buffer = noiseBuffer('brown'); ns.loop = true;
+    var ng = ctx.createGain(); ng.gain.value = 0.16;
+    var nlp = ctx.createBiquadFilter(); nlp.type = 'lowpass'; nlp.frequency.value = 200;
+    ns.connect(ng); ng.connect(nlp); nlp.connect(g);
+    var lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.13;
+    var lg = ctx.createGain(); lg.gain.value = 36;
+    lfo.connect(lg); lg.connect(lp.frequency);
+    var t = ctx.currentTime;
+    o1.start(t); o2.start(t); ns.start(t); lfo.start(t);
+    musicLive += 4; if (musicLive > musicPeak) musicPeak = musicLive;
+    pad = { g: g, o1: o1, o2: o2, ns: ns, lfo: lfo };
+    musicApplyCheap();
+  }
+  function stopPad() {
+    if (!pad) return;
+    try { pad.o1.stop(); } catch (e1) {}
+    try { pad.o2.stop(); } catch (e2) {}
+    try { pad.ns.stop(); } catch (e3) {}
+    try { pad.lfo.stop(); } catch (e4) {}
+    try { pad.g.disconnect(); } catch (e5) {}
+    pad = null; musicLive = Math.max(0, musicLive - 4);
+  }
+  function padLevel() { return (!musicOn || musicCheap()) ? 0 : (musicScene === 'lobby' ? 0.07 : 0.11); }
+  function musicApplyCheap() {
+    if (pad && ctx) try { pad.g.gain.setTargetAtTime(padLevel(), ctx.currentTime, 0.08); } catch (e) {}
+  }
+  function pingAnvil(t0, amt) {
+    var n = musicCheap() ? 1 : 2, f0 = 820 * (0.85 + 0.3 * amt);
+    for (var i = 0; i < n; i++) mOsc('triangle', f0 * METAL[i] * (0.985 + Math.random() * 0.03), fadeGain, t0, 0.09 + i * 0.04, 0.11 * amt / n);
+  }
+  function pingBass(t0, n) { var f = midiHz(n); mOsc('triangle', f, fadeGain, t0, 0.18, 0.15, f * 0.5); }
+  function pingTune(t0, n) { mOsc('triangle', midiHz(n), fadeGain, t0, 0.16, 0.05); }
+  function pingAlarm(t0) { mOsc('square', 640, fadeGain, t0, 0.055, 0.028, 520); }
+  function darken(n) {
+    if (musicLevel < 1) return n;
+    var pc = n % 12;
+    return (pc === 4 || pc === 11) ? n - 1 : n;
+  }
+  function musicEmit(step, t0) {
+    var s = step & 15, strong = s === 0 || s === 8, mid = s === 4 || s === 12, beat = !(s & 1);
+    if (musicScene === 'lobby') { if (strong) pingAnvil(t0, 0.42); return; }
+    if (musicLevel >= 1 && beat) pingAnvil(t0, strong ? 1.15 : (mid ? 0.9 : 0.65));
+    else if (strong || mid) pingAnvil(t0, strong ? 1 : 0.68);
+    if (BASS_PAT[s]) pingBass(t0, darken(BASS_PAT[s]));
+    if (musicCheap()) return;
+    var m = ((step & 16) ? TUNE_B : TUNE_A)[s];
+    if (m) pingTune(t0, darken(m));
+    if (musicLevel >= 1 && !beat) pingAlarm(t0);
+  }
+  function musicSchedule() {
+    if (!ctx) return;
+    var now = ctx.currentTime, ahead = now + 0.1, guard = 0;
+    if (musicNext < now - 0.05) musicNext = now + 0.02;
+    while (musicNext < ahead && guard++ < 16) {
+      musicEmit(musicStep, musicNext);
+      musicStep++;
+      musicNext += stepDur();
+    }
+  }
+  function musicPump() {
+    if (musicTimer) { cancelLater(musicTimer); musicTimer = 0; }
+    if (!musicOn || musicHidden || !ctx) return;
+    try { musicSchedule(); } catch (e) {}
+    musicTimer = later(musicPump, 25);
+  }
+  function musicTeardown() {
+    musicOn = false; musicFading = false; musicLevel = 0;
+    if (musicTimer) { cancelLater(musicTimer); musicTimer = 0; }
+    stopPad();
+    if (fadeGain && ctx) try { fadeGain.gain.cancelScheduledValues(ctx.currentTime); fadeGain.gain.setValueAtTime(0, ctx.currentTime); } catch (e) {}
+  }
+  function musicStart(scene) {
+    return safe(function () {
+      scene = scene === 'lobby' ? 'lobby' : 'match';
+      musicWanted = scene;
+      if (!unlocked || !ctx) return false;
+      ensureMusicGraph();
+      if (!musicGain || !fadeGain) return false;
+      if (musicOn && musicScene === scene && !musicFading) return true;
+      try { fadeGain.gain.cancelScheduledValues(ctx.currentTime); fadeGain.gain.setTargetAtTime(1, ctx.currentTime, 0.05); } catch (e) {}
+      musicFading = false; musicScene = scene;
+      if (!musicOn) { musicLevel = 0; musicStep = 0; }
+      musicOn = true; musicHidden = isHidden();
+      ensurePad(); musicApplyCheap();
+      if (!musicHidden) { musicNext = ctx.currentTime + 0.06; musicPump(); }
+      return true;
+    });
+  }
+  function musicStop(fade) {
+    return safe(function () {
+      musicWanted = null;
+      if (!musicOn) return;
+      var sec = (fade === false || fade === 0) ? 0 : (typeof fade === 'number' ? fade : 0.4);
+      if (!ctx || !fadeGain || sec <= 0) { musicTeardown(); return; }
+      musicFading = true;
+      try {
+        var t = ctx.currentTime, cur = fadeGain.gain.value;
+        fadeGain.gain.cancelScheduledValues(t);
+        fadeGain.gain.setValueAtTime(Math.max(cur, 0.001), t);
+        fadeGain.gain.linearRampToValueAtTime(0.0001, t + sec);
+      } catch (e) {}
+      later(function () { if (musicFading) musicTeardown(); }, sec * 1000 + 40);
+    });
+  }
+  function musicIntensify(lvl) { if (musicOn && lvl > musicLevel) musicLevel = lvl; }
+  function musicDuck() {
+    if (!duckGain || !ctx || !musicOn) return;
+    try {
+      var t = ctx.currentTime;
+      duckGain.gain.cancelScheduledValues(t);
+      duckGain.gain.setValueAtTime(0.5, t);
+      duckGain.gain.setTargetAtTime(1, t + 0.3, 0.08);
+    } catch (e) {}
+  }
+  function musicOnCue(name) {
+    if (name === 'wave' || name === 'wave_boss') {
+      if (!musicOn || musicScene !== 'match') musicStart('match');
+      musicDuck();
+    } else if (name === 'sudden') {
+      if (!musicOn || musicScene !== 'match') musicStart('match');
+      musicIntensify(1); musicDuck();
+    } else if (name === 'finishing') { if (musicOn) musicIntensify(2); }
+    else if (name === 'win' || name === 'lose' || name === 'draw') musicStop(1.5);
+    else if (name === 'leak' || name === 'life_loss') musicDuck();
+  }
+  function setMusicVolume(v) {
+    return safe(function () { musicVolume = clamp(Number(v) || 0, 0, 1); persist(); applyMusicGain(); return musicVolume; });
+  }
+  function getMusicVolume() { return musicVolume; }
+  function setMusicMuted(b) {
+    return safe(function () { musicMuted = !!b; persist(); applyMusicGain(); return musicMuted; });
+  }
+  function toggleMusicMute() { return setMusicMuted(!musicMuted); }
+  function isMusicMuted() { return !!musicMuted; }
+
   function play(name, opts) {
     return safe(function () {
       opts = opts || {};
       if (!supported()) return;
       if (!ctx || !unlocked) return;
-      if (muted || volume <= 0) return;
       if (ctx.state === 'suspended' && ctx.resume) ctx.resume().catch(function () {});
       if (ctx.state !== 'running' && ctx.state !== 'suspended') return;
       name = resolveName(String(name || ''), opts);
+      musicOnCue(name);
+      if (muted || volume <= 0) return;
       var fn = SOUNDS[name];
       if (!fn) return;
       var meta = META[name] || { minInterval: 0.05, maxVoices: 4, prio: 3, vary: 0.05 };
@@ -877,6 +1120,7 @@
   function setLoad(n) {
     return safe(function () {
       load = Math.max(0, Number(n) || 0);
+      musicApplyCheap();
       return load;
     });
   }
@@ -894,7 +1138,8 @@
     return {
       load: load, tokens: +tokens.toFixed(2), nodes: nodeCount, rate: bucketRate(),
       emaMs: +emaMs.toFixed(1), lagging: lagging, cheap: stressed(),
-      baseline: +baseline.toFixed(2), haveBase: haveBase
+      baseline: +baseline.toFixed(2), haveBase: haveBase,
+      music: musicStats()
     };
   }
   function resetStats() { nodeCount = 0; }
@@ -911,7 +1156,25 @@
     names: names,
     setLoad: setLoad,
     stats: stats,
-    resetStats: resetStats
+    resetStats: resetStats,
+    music: {
+      start: musicStart,
+      stop: musicStop,
+      setVolume: setMusicVolume,
+      getVolume: getMusicVolume,
+      setMuted: setMusicMuted,
+      toggleMute: toggleMusicMute,
+      isMuted: isMusicMuted,
+      isPlaying: function () { return !!musicOn; },
+      stats: musicStats
+    },
+    startMusic: musicStart,
+    stopMusic: musicStop,
+    setMusicVolume: setMusicVolume,
+    getMusicVolume: getMusicVolume,
+    setMusicMuted: setMusicMuted,
+    toggleMusicMute: toggleMusicMute,
+    isMusicMuted: isMusicMuted
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = audio;
