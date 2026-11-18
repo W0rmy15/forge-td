@@ -242,7 +242,7 @@
     // effects from events
     for (const e of (s.ev || [])) {
       if (e.k === 'shot') {
-        aud('shot_' + e.tt, { board: e.b, x: e.x1 });
+        aud('shot_' + e.tt, { board: e.b, x: e.x1, h: e.h });
         const k = twKey(e.b, Math.floor(e.x1), Math.floor(e.y1));
         let a = TWR.get(k); if (!a) { a = { ang: 0, kick: 0 }; TWR.set(k, a); }
         a.ang = Math.atan2(e.y2 - e.y1, e.x2 - e.x1) + Math.PI / 2; a.kick = performance.now();
