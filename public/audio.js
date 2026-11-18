@@ -35,6 +35,8 @@
   // (144 Hz … 50 Hz). Absolute 14/16/20 ms thresholds wrongly treat 60 Hz as "never recovered" and 50 Hz as lag.
   var baseSamples = [], baseline = 16.7, haveBase = false;
   var BASE_MIN = 6, BASE_MAX = 21, BASE_NEED = 20, BASE_CAP = 45;
+  // Slow devices (dt > 24 ms) never fill baseSamples. After ~2 s / 60 visible frames, adopt a clamped median anyway.
+  var fallbackSamples = [], visFrames = 0, visMs = 0;
 
   // Inharmonic metal partials (not a harmonic series — sounds like struck iron, not a bell copy).
   var METAL = [1, 1.34, 1.77, 2.21, 2.92, 3.61, 4.45, 5.43];
@@ -154,6 +156,23 @@
       haveBase = true;
     }
   }
+  function adoptFallback(ts) {
+    if (haveBase || fallbackSamples.length < 8) return;
+    if (visFrames < 60 && visMs < 2000) return;
+    var med = medianOf(fallbackSamples);
+    baseline = clamp(med, BASE_MIN, BASE_MAX);
+    haveBase = true;
+    // Clamped baseline is 21 ms on a 28–40 ms device. Steady 28 ms stays out of cheap mode
+    // (~36 Hz, playable). A truly slow steady 33–40 ms device enters cheap and stays there
+    // until frames actually get faster, so it does not flap.
+    if (med >= 32) {
+      lagging = true;
+      goodStreak = 0;
+      lagUntil = (ts || 0) + 500;
+      musicApplyCheap();
+      smelterApplyCheap();
+    }
+  }
   function startRafWatch() {
     if (rafOn || !root.requestAnimationFrame) return;
     rafOn = true;
@@ -169,7 +188,16 @@
       if (dt < 4 || dt > 250) return; // first tick after a tab hide/show, or nonsense
       emaMs += 0.22 * (dt - emaMs);
       sampleBaseline(dt);
-      if (!haveBase) return; // don't judge lag until we know the refresh rate
+      if (!haveBase) {
+        if (dt >= 5.5) {
+          if (fallbackSamples.length >= 90) fallbackSamples.shift();
+          fallbackSamples.push(dt);
+          visFrames++;
+          visMs += dt;
+          adoptFallback(ts);
+        }
+        if (!haveBase) return; // don't judge lag until we know the refresh rate
+      }
       var longLim = Math.max(33, baseline * 2.5);
       var goodLim = baseline * 1.25 + 3;
       var emaExit = baseline * 1.25 + 2;
