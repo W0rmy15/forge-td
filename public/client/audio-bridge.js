@@ -31,5 +31,29 @@
     paint();
   })();
 
+  // Music volume / mute (optional hooks from Forge Sound's MUSIC-HOOKS.md). Guarded like the SFX controls.
+  (function setupMusicUi() {
+    const btn = $('musicBtn'), slider = $('musicSlider');
+    if (!btn || !slider) return;
+    const music = () => { const a = window.forgeAudio; return a && typeof a.getMusicVolume === 'function' ? a : null; };
+    const paint = () => {
+      try {
+        const a = music(); if (!a) return;
+        slider.value = Math.round(a.getMusicVolume() * 100);
+        const muted = typeof a.isMusicMuted === 'function' && a.isMusicMuted();
+        btn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+        btn.title = muted ? 'Music muted' : 'Music';
+      } catch (e) {}
+    };
+    const blur = () => { try { btn.blur(); slider.blur(); } catch (e) {} };
+    btn.onclick = () => { try { const a = music(); if (a) { if (a.unlock) a.unlock(); if (a.toggleMusicMute) a.toggleMusicMute(); } } catch (e) {} aud('ui_click'); paint(); blur(); };
+    slider.oninput = () => { try { const a = music(); if (a) { if (a.unlock) a.unlock(); if (a.setMusicVolume) a.setMusicVolume(+slider.value / 100); } } catch (e) {} paint(); };
+    btn.addEventListener('pointerup', blur);
+    slider.addEventListener('pointerup', blur);
+    slider.addEventListener('change', blur);
+    slider.addEventListener('keyup', blur);
+    paint();
+  })();
+
   FTD.audApi = audApi; FTD.aud = aud;
 })();

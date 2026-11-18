@@ -205,7 +205,10 @@
     runner: ['#f0c060', '#ff9a28', '#fff6c4'],
     swarm:  ['#5c2248', '#6a2030', '#141c28'],
     brute:  ['#6a2a18', '#8a3a20', '#4a2014'],
-    boss:   ['#3a1830']
+    boss:   ['#3a1830'],
+    // v0.6: kill-confetti colours (bodies are drawn with their own palette below)
+    splitter: ['#ffb030'],
+    shard:    ['#e8501a']
   };
   A.creepColor = function (kind, v) {
     if (kind === 'neutral') return BALLOON[((v || 1) - 1) % BALLOON.length];
@@ -214,7 +217,7 @@
   };
   // Guard against bad wire data (e.g. a string radius): never let NaN reach a gradient or canvas size.
   function finR(R) { R = +R; return R > 0 && R < 1e4 ? R : 8; }
-  A.creepR = function (kind, r, cell) { const v = (+r) * (+cell) * (kind === 'swarm' ? 1.7 : kind === 'boss' ? 1.25 : 1.4); return Math.max(kind === 'swarm' ? 7 : 5.5, v === v && v < 1e4 ? v : 0); };
+  A.creepR = function (kind, r, cell) { const v = (+r) * (+cell) * (kind === 'swarm' ? 1.7 : kind === 'boss' ? 1.25 : kind === 'shard' ? 1.5 : 1.4); return Math.max(kind === 'swarm' ? 7 : kind === 'shard' ? 6 : 5.5, v === v && v < 1e4 ? v : 0); };
 
   function tierRing(g, R, tier) {
     if (!tier) return;
@@ -265,7 +268,11 @@
   function drawCreep(g, kind, v, R) {
     const col = A.creepColor(kind, v);
     const lw = Math.max(2.7, R * 0.22);
-    const tier = (kind === 'runner' || kind === 'brute' || kind === 'swarm') ? Math.max(0, Math.min(3, v || 0)) : 0;
+    const tier = (kind === 'runner' || kind === 'brute' || kind === 'swarm') ? Math.max(0, Math.min(3, v || 0))
+      : (kind === 'splitter' || kind === 'shard') && v >= 0 && v <= 3 ? (v | 0) : 0; // neutral Splitters carry the wave number (>= 8): no tier
+
+    if (kind === 'splitter') { drawSplitter(g, R, tier, lw, v > 3); tierBadge(g, R, tier); return; }
+    if (kind === 'shard') { drawShard(g, R, tier, lw); return; }
 
     if (kind === 'runner') {
       heat(g, R, 0.2);
@@ -369,12 +376,75 @@
     emberEye(g, R * 0.22, -R * 0.08, R * 0.16, false);
   }
 
+  /* v0.6 Slag Splitter: a cracked slag geode, molten seam splitting it open, glowing crystal shards poking out. */
+  const GEODE = '#5c5868', GEODE_N = '#6a5848';
+  function seam(g, R) {
+    // one bold zigzag split down the middle, like an egg cracking open: dark under-stroke, hot body, white-hot core
+    const pts = [0.05, -1.05, -0.12, -0.55, 0.14, -0.2, -0.1, 0.18, 0.12, 0.55, -0.04, 1.05];
+    const path = () => { g.beginPath(); g.moveTo(pts[0] * R, pts[1] * R); for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i] * R, pts[i + 1] * R); };
+    g.save(); g.lineJoin = 'miter'; g.lineCap = 'round';
+    path(); g.strokeStyle = 'rgba(255,140,30,0.45)'; g.lineWidth = Math.max(5, R * 0.62); g.stroke();
+    path(); g.strokeStyle = OUT; g.lineWidth = Math.max(3.4, R * 0.38); g.stroke();
+    path(); g.strokeStyle = '#ff8a1a'; g.lineWidth = Math.max(2.2, R * 0.25); g.stroke();
+    path(); g.strokeStyle = '#fff0a0'; g.lineWidth = Math.max(1.1, R * 0.1); g.stroke();
+    g.restore();
+  }
+  function crystal(g, a, r0, r1, wid, col) {
+    const ca = Math.cos(a), sa = Math.sin(a), px = -sa, py = ca;
+    g.beginPath();
+    g.moveTo(ca * r0 + px * wid, sa * r0 + py * wid);
+    g.lineTo(ca * (r1 - wid * 0.5) + px * wid * 0.75, sa * (r1 - wid * 0.5) + py * wid * 0.75);
+    g.lineTo(ca * r1, sa * r1);
+    g.lineTo(ca * (r1 - wid * 0.5) - px * wid * 0.75, sa * (r1 - wid * 0.5) - py * wid * 0.75);
+    g.lineTo(ca * r0 - px * wid, sa * r0 - py * wid);
+    g.closePath();
+    g.fillStyle = glossy(g, ca * r1 * 0.8, sa * r1 * 0.8, wid * 2.2, col); g.fill();
+    g.lineWidth = Math.max(1.6, wid * 0.32); g.strokeStyle = OUT; g.stroke();
+    g.beginPath(); g.moveTo(ca * r0 + px * wid * 0.2, sa * r0 + py * wid * 0.2); g.lineTo(ca * (r1 - wid * 0.3), sa * (r1 - wid * 0.3));
+    g.strokeStyle = 'rgba(255,250,220,0.9)'; g.lineWidth = Math.max(0.9, wid * 0.2); g.stroke();
+  }
+  function drawSplitter(g, R, tier, lw, neutral) {
+    heat(g, R, 0.16);
+    tierRing(g, R * 1.04, tier);
+    // a crown of glowing crystal shards breaking out of the top; 4 at T3, like the 4 shards it drops
+    const n = tier >= 3 ? 4 : 3, cc = '#ffb040', span = n === 4 ? 0.62 : 0.8;
+    for (let i = 0; i < n; i++) crystal(g, -Math.PI / 2 + (i - (n - 1) / 2) * span, R * 0.45, R * (i === 0 || i === n - 1 ? 1.28 : 1.48), R * 0.3, cc);
+    fillLump(g, R, neutral ? GEODE_N : GEODE, lw, 1.06, 0.96, 1);
+    g.save(); lumpPath(g, R, 1.06, 0.96, 1); g.clip();
+    cracks(g, R, 3, '#ffb030');
+    seam(g, R);
+    g.restore();
+    // re-stroke the rim so the seam glow stays inside the outline
+    lumpPath(g, R, 1.06, 0.96, 1); g.lineWidth = lw; g.strokeStyle = OUT; g.stroke();
+    // eyes either side of the split
+    emberEye(g, -R * 0.42, -R * 0.05, R * 0.19, false);
+    emberEye(g, R * 0.44, -R * 0.12, R * 0.19, false);
+  }
+  /* v0.6 Shard: a small, fast, faceted molten chip with one ember eye. */
+  function drawShard(g, R, tier, lw) {
+    // short ember trail baked behind it (low cost: part of the cached sprite)
+    g.beginPath(); g.ellipse(-R * 0.05, R * 0.9, R * 0.5, R * 0.28, 0, 0, 7); g.fillStyle = 'rgba(255,150,40,0.35)'; g.fill();
+    if (tier) tierRing(g, R * 1.02, tier);
+    const P = [0, -1.18, 0.86, -0.18, 0.4, 0.96, -0.58, 0.8, -0.92, -0.16];
+    const path = () => { g.beginPath(); g.moveTo(P[0] * R, P[1] * R); for (let i = 2; i < P.length; i += 2) g.lineTo(P[i] * R, P[i + 1] * R); g.closePath(); };
+    path(); g.fillStyle = glossy(g, -R * 0.15, -R * 0.3, R * 1.1, '#d8481a'); g.fill();
+    g.lineJoin = 'round'; g.lineWidth = Math.max(2, lw * 0.85); g.strokeStyle = OUT; g.stroke();
+    // facets: one hot top face, bright edges
+    g.beginPath(); g.moveTo(0, -1.18 * R); g.lineTo(0.86 * R, -0.18 * R); g.lineTo(0.05 * R, 0.05 * R); g.lineTo(-0.92 * R, -0.16 * R); g.closePath();
+    g.fillStyle = 'rgba(255,214,90,0.9)'; g.fill();
+    g.beginPath(); g.moveTo(0.05 * R, 0.05 * R); g.lineTo(0.4 * R, 0.96 * R);
+    g.strokeStyle = 'rgba(255,240,180,0.8)'; g.lineWidth = Math.max(0.9, R * 0.1); g.stroke();
+    emberEye(g, -R * 0.08, -R * 0.1, Math.max(1.6, R * 0.26), false);
+  }
+
+  A.hasCreep = function (kind) { return kind === 'neutral' || kind === 'runner' || kind === 'brute' || kind === 'swarm' || kind === 'boss' || kind === 'splitter' || kind === 'shard'; };
   A.creep = function (kind, v, R) {
     R = finR(R);
-    const Rq = Math.round(R * 2) / 2, vk = kind === 'neutral' ? ((v || 1) - 1) % BALLOON.length : kind === 'boss' ? 0 : Math.min(3, v || 0);
+    const Rq = Math.round(R * 2) / 2, vk = kind === 'neutral' ? ((v || 1) - 1) % BALLOON.length : kind === 'boss' ? 0
+      : (kind === 'splitter' || kind === 'shard') ? (v >= 0 && v <= 3 ? (v | 0) : 'n') : Math.min(3, v || 0);
     // Tight canvas: T3 ring spikes reach ~R+8; keep a 2 px pad. Smaller than 5.2R+16 to cut overdraw.
     const size = Math.ceil(Math.max(Rq * 3.8 + 8, (Rq + 8) * 2 + 4));
-    return sprite(`cr|${kind}|${vk}|${Rq}`, size, size, (g) => drawCreep(g, kind, kind === 'neutral' ? vk + 1 : vk, Rq));
+    return sprite(`cr|${kind}|${vk}|${Rq}`, size, size, (g) => drawCreep(g, kind, kind === 'neutral' ? vk + 1 : vk === 'n' ? 99 : vk, Rq));
   };
   A.creepFlash = function (R) {
     R = finR(R);
@@ -527,12 +597,97 @@
     g.fillStyle = 'rgba(180,230,255,0.55)'; g.fill(); g.lineWidth = 1.2; g.strokeStyle = OUT; g.stroke();
   }
 
+  /* v0.6 Smelter: a squat furnace with a molten grate and a coiled heat lance (faces up; the client rotates it). */
+  function smelter(g, lvl) {
+    const iron = lvl >= 2 ? '#7a5a3a' : '#5a4a40', coil = lvl >= 2 ? '#ffc44a' : '#d0782a', len = 20 + lvl * 1.5;
+    // exhaust stacks
+    for (const sx of [-1, 1]) {
+      rrect(g, sx * 13 - 2.6, -7, 5.2, 10, 1.6);
+      g.fillStyle = ironFill(g, sx * 13, -3, 5, shade(iron, -0.06)); g.fill(); g.lineWidth = 1.8; g.strokeStyle = OUT; g.stroke();
+      g.beginPath(); g.ellipse(sx * 13, -7, 2.6, 1.2, 0, 0, 7); g.fillStyle = '#ff8a1a'; g.fill(); g.lineWidth = 1; g.strokeStyle = OUT; g.stroke();
+    }
+    // furnace drum
+    rrect(g, -12, -5, 24, 19, 7);
+    g.fillStyle = ironFill(g, 0, 2, 16, iron); g.fill(); g.lineWidth = 2.4; g.strokeStyle = OUT; g.stroke();
+    // molten grate
+    rrect(g, -7.5, 2, 15, 8.5, 3);
+    const gr = g.createRadialGradient(0, 7, 1, 0, 6, 9);
+    gr.addColorStop(0, '#fff0a0'); gr.addColorStop(0.45, '#ff8a20'); gr.addColorStop(1, '#8a2008');
+    g.fillStyle = gr; g.fill(); g.lineWidth = 1.8; g.strokeStyle = OUT; g.stroke();
+    g.beginPath(); for (const x of [-3.5, 0, 3.5]) { g.moveTo(x, 2.6); g.lineTo(x, 10); }
+    g.strokeStyle = OUT; g.lineWidth = 1.4; g.stroke();
+    // tapered lance
+    g.beginPath(); g.moveTo(-4.6, -3); g.lineTo(-3, -len + 2); g.lineTo(3, -len + 2); g.lineTo(4.6, -3); g.closePath();
+    g.fillStyle = ironFill(g, 0, -10, 10, shade(iron, 0.08)); g.fill(); g.lineWidth = 2.2; g.strokeStyle = OUT; g.stroke();
+    // copper (T3: gold) coils
+    const bands = 2 + lvl;
+    for (let i = 0; i < bands; i++) {
+      const y = -6 - i * ((len - 10) / bands), w = 4.9 - i * 0.35;
+      rrect(g, -w, y - 1.5, w * 2, 3, 1.4);
+      g.fillStyle = coil; g.fill(); g.lineWidth = 1.1; g.strokeStyle = OUT; g.stroke();
+    }
+    // white-hot emitter
+    const tip = g.createRadialGradient(0, -len, 0.5, 0, -len, 4.2 + lvl * 0.4);
+    tip.addColorStop(0, '#ffffff'); tip.addColorStop(0.4, '#ffe070'); tip.addColorStop(1, '#ff6a1a');
+    g.beginPath(); g.arc(0, -len, 3.8 + lvl * 0.4, 0, 7); g.fillStyle = tip; g.fill(); g.lineWidth = 1.8; g.strokeStyle = OUT; g.stroke();
+    rivet(g, -8.5, -1, 1.4); rivet(g, 8.5, -1, 1.4);
+    if (lvl >= 1) { plate(g, -10.5, 8, 5, 8, -0.15, lvl, iron); plate(g, 10.5, 8, 5, 8, 0.15, lvl, iron); }
+    if (lvl >= 2) rune(g, 0, -1, 2.6, '#ffc44a');
+  }
+
   A.tower = function (type, lvl) {
     const L = Math.max(0, Math.min(2, lvl || 0));
     return sprite(`tw|${type}|${L}`, 52, 52, (g) => {
       if (type === 'cannon') crucible(g, L);
       else if (type === 'frost') quench(g, L);
+      else if (type === 'smelter') smelter(g, L);
       else ballista(g, L);
+    });
+  };
+  A.hasTower = function (type) { return type === 'arrow' || type === 'cannon' || type === 'frost' || type === 'smelter'; };
+  /* Smelter heat beam, one cached strip per heat stage (0 cold .. 3 white-hot). The client stretches it along the beam
+     with a single drawImage. Thickness and brightness both rise with the stage (luminance cue, CVD-safe). */
+  const BEAM = [
+    { h: 7, glow: 'rgba(190,40,10,0.30)', body: '#b83a14', core: '#ff8a3a', cw: 1.2 },
+    { h: 10, glow: 'rgba(240,80,20,0.34)', body: '#ff5a14', core: '#ffb050', cw: 1.8 },
+    { h: 13, glow: 'rgba(255,130,30,0.40)', body: '#ff8a1a', core: '#ffe890', cw: 2.6 },
+    { h: 17, glow: 'rgba(255,190,70,0.48)', body: '#ffb030', core: '#ffffff', cw: 3.6 }
+  ];
+  A.beamStyle = function (stage) { return BEAM[Math.max(0, Math.min(3, stage | 0))]; }; // stroke styles for the per-frame beam
+  A.beam = function (stage) {
+    const S = Math.max(0, Math.min(3, stage | 0)), b = BEAM[S];
+    return sprite(`beam|${S}`, 32, b.h, (g) => {
+      const H = b.h, bw = H * 0.46;
+      g.fillStyle = b.glow; g.fillRect(-16, -H / 2, 32, H);
+      g.fillStyle = 'rgba(26,21,18,0.75)'; g.fillRect(-16, -bw / 2 - 0.9, 32, bw + 1.8); // dark edge keeps it readable on light ground
+      g.fillStyle = b.body; g.fillRect(-16, -bw / 2, 32, bw);
+      g.fillStyle = b.core; g.fillRect(-16, -b.cw / 2, 32, b.cw);
+    });
+  };
+  A.beamHit = function (stage) {
+    const S = Math.max(0, Math.min(3, stage | 0)), r = 5 + S * 2.6;
+    return sprite(`bhit|${S}`, r * 2 + 4, r * 2 + 4, (g) => {
+      const gr = g.createRadialGradient(0, 0, 0.5, 0, 0, r);
+      gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.3, S >= 2 ? '#ffe070' : '#ffb050'); gr.addColorStop(0.65, 'rgba(255,110,20,0.55)'); gr.addColorStop(1, 'rgba(255,60,0,0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill();
+      g.strokeStyle = '#fff0a0'; g.lineWidth = 1.1;
+      for (let i = 0; i < 6; i++) { const a = i * 1.047 + 0.3; g.beginPath(); g.moveTo(Math.cos(a) * r * 0.35, Math.sin(a) * r * 0.35); g.lineTo(Math.cos(a) * r * 0.95, Math.sin(a) * r * 0.95); g.stroke(); }
+    });
+  };
+  /* Splitter burst: a star of molten cracks + white flash, drawn once and scaled by the client. */
+  A.splitBurst = function () {
+    return sprite('sburst', 64, 64, (g) => {
+      const gr = g.createRadialGradient(0, 0, 1, 0, 0, 16);
+      gr.addColorStop(0, 'rgba(255,255,240,0.95)'); gr.addColorStop(0.5, 'rgba(255,180,60,0.6)'); gr.addColorStop(1, 'rgba(255,90,20,0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(0, 0, 16, 0, 7); g.fill();
+      const rg = rng(91);
+      for (let i = 0; i < 7; i++) {
+        const a = i * 0.8976 + rg() * 0.3, r1 = 22 + rg() * 8, mid = r1 * 0.5, wob = (rg() - 0.5) * 6;
+        const path = () => { g.beginPath(); g.moveTo(Math.cos(a) * 5, Math.sin(a) * 5); g.lineTo(Math.cos(a) * mid + Math.cos(a + 1.57) * wob, Math.sin(a) * mid + Math.sin(a + 1.57) * wob); g.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); };
+        path(); g.strokeStyle = OUT; g.lineWidth = 4.2; g.stroke();
+        path(); g.strokeStyle = '#ff8a1a'; g.lineWidth = 2.6; g.stroke();
+        path(); g.strokeStyle = '#ffe890'; g.lineWidth = 1.1; g.stroke();
+      }
     });
   };
   A.rotates = function (type) { return type !== 'frost'; };
@@ -825,16 +980,19 @@
 
   A.warmup = function (cell) {
     const C = cell || 32;
-    const kinds = ['neutral', 'runner', 'brute', 'swarm', 'boss'];
+    const kinds = ['neutral', 'runner', 'brute', 'swarm', 'boss', 'splitter', 'shard'];
     for (const k of kinds) {
       const vmax = k === 'neutral' ? 8 : k === 'boss' ? 1 : 4;
       const vmin = k === 'neutral' ? 1 : 0;
       for (let v = vmin; v < vmin + vmax; v++) {
-        const R = A.creepR(k, k === 'boss' ? 1.1 : 1, C);
+        const R = k === 'splitter' ? A.creepR(k, 0.3, C) : k === 'shard' ? A.creepR(k, 0.15, C) : A.creepR(k, k === 'boss' ? 1.1 : 1, C);
         A.creep(k, v, R); A.creepFlash(R); A.creepIce(R); A.shadow(R);
       }
     }
-    for (const t of ['arrow', 'cannon', 'frost']) for (let l = 0; l < 3; l++) A.tower(t, l);
+    for (const t of ['arrow', 'cannon', 'frost', 'smelter']) for (let l = 0; l < 3; l++) A.tower(t, l);
+    for (const k of ['splitter', 'shard']) { const R = A.creepR(k, k === 'splitter' ? 0.3 : 0.15, C); A.creep(k, 99, R); A.creepFlash(R); A.creepIce(R); A.creepIceLite(R); A.shadow(R); }
+    for (let h = 0; h < 4; h++) A.beamHit(h);
+    A.splitBurst();
     A.pad('#c4923a', 0, C); A.pad('#7a96aa', 0, C);
     A.dart(false); A.dart(true); A.ball(); A.shard(); A.coin(); A.heart();
   };

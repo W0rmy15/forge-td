@@ -540,12 +540,17 @@
       const n = (big ? 12 : e.kind === 'swarm' ? 5 : 8) >> (lowDetail ? 1 : 0);
       for (let i = 0; i < n; i++) { const a = (i / n) * 6.28 + Math.random() * 0.5, sp = 0.05 + Math.random() * 0.07; const p = spawnP('conf', x, y, 420 + Math.random() * 250); if (p) { p.vx = Math.cos(a) * sp; p.vy = Math.sin(a) * sp - 0.03; p.col = i % 3 === 0 ? '#ffffff' : col; p.s = 1.8 + Math.random() * 2; p.vr = (Math.random() - 0.5) * 0.03; } }
       if (e.o === you) { const t = spawnP('text', x, y - 6, 900); if (t) { t.txt = '+' + e.g; t.col = '#ffd23a'; t.s = e.g >= 10 ? 15 : 12; } }
-    } else if (e.k === 'split') { // v0.6 PLACEHOLDER (Forge Art: replace): a small orange ring where a Splitter burst
-      const ring = spawnP('ring', bx(e.b, e.x), by(e.y), 240); if (ring) { ring.s = CELL * 0.6; ring.col = '255,140,50'; }
+    } else if (e.k === 'split') { // Splitter bursts: crack-star flash, molten ring, flying geode chips
+      const x = bx(e.b, e.x), y = by(e.y);
+      const bu = spawnP('burst', x, y, 320); if (bu) bu.s = CELL * 1.25;
+      const ring = spawnP('ring', x, y, 300); if (ring) { ring.s = CELL * 0.95; ring.col = '255,150,40'; }
+      const n = Math.min(8, (e.n || 3) * 2) >> (lowDetail ? 1 : 0);
+      for (let i = 0; i < n; i++) { const a = (i / n) * 6.28 + Math.random() * 0.6, sp = 0.06 + Math.random() * 0.05; const p = spawnP('conf', x, y, 360 + Math.random() * 200); if (p) { p.vx = Math.cos(a) * sp; p.vy = Math.sin(a) * sp - 0.025; p.col = i % 3 === 0 ? '#4e4a56' : i % 3 === 1 ? '#ffd040' : '#ff7a2a'; p.s = 2 + Math.random() * 1.6; p.vr = (Math.random() - 0.5) * 0.04; } }
     } else if (e.k === 'leak') {
       const t = spawnP('text', bx(e.team, S.BASE.c + 0.5), by(S.BASE.r) - 4, 1000); if (t) { t.txt = '-' + e.n + ' ♥'; t.col = '#ff4d6d'; t.s = 15; }
     }
   }
+  const BEAM_EDGE = 'rgba(26,21,18,0.75)';
   function drawP(now) {
     for (let i = 0; i < POOL; i++) {
       const p = P[i]; if (!p.on) continue;
@@ -553,9 +558,19 @@
       if (k >= 1) { freeP(p); continue; }
       if (p.t === 'proj') {
         const x = p.x + (p.x2 - p.x) * k, y = p.y + (p.y2 - p.y) * k;
-        if (p.txt === 'smelter') { // v0.6 PLACEHOLDER (Forge Art: replace): heat beam, thicker/brighter with heat stage p.a (0..3)
-          ctx.strokeStyle = `rgba(255,${150 - p.a * 30},40,${0.55 + p.a * 0.12})`; ctx.lineWidth = 2 + p.a * 1.5;
-          ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x2, p.y2); ctx.stroke();
+        if (p.txt === 'smelter') { // heat beam: 2-4 strokes (butt caps = canvas default) from the lance tip, thicker/brighter with heat stage p.a (0..3)
+          const b = AR.beamStyle(p.a), dx = p.x2 - p.x, dy = p.y2 - p.y, len = Math.sqrt(dx * dx + dy * dy) || 1, off = Math.min(16, len * 0.5);
+          const w = 1 + Math.sin(now * 0.045 + p.x) * 0.14, bw = b.h * 0.46 * w;
+          ctx.globalAlpha = k > 0.8 ? (1 - k) * 5 : 1;
+          ctx.beginPath(); ctx.moveTo(p.x + dx / len * off, p.y + dy / len * off); ctx.lineTo(p.x2, p.y2);
+          if (!lowDetail) {
+            if (p.a >= 3) { ctx.strokeStyle = b.glow; ctx.lineWidth = b.h * w; ctx.stroke(); }
+            ctx.strokeStyle = BEAM_EDGE; ctx.lineWidth = bw + 1.8; ctx.stroke();
+          }
+          ctx.strokeStyle = b.body; ctx.lineWidth = bw; ctx.stroke();
+          ctx.strokeStyle = b.core; ctx.lineWidth = b.cw; ctx.stroke();
+          if (!lowDetail && p.a >= 2) { const hs = AR.beamHit(p.a), hz = 0.85 + 0.25 * Math.sin(now * 0.04 + p.y); ctx.drawImage(hs.c, p.x2 - hs.w * hz / 2, p.y2 - hs.h * hz / 2, hs.w * hz, hs.h * hz); }
+          ctx.globalAlpha = 1;
         } else if (p.txt === 'cannon') {
           const lift = Math.sin(k * Math.PI) * 9, sc = 1 + Math.sin(k * Math.PI) * 0.35, sp = AR.ball();
           for (let j = 1; j <= 3; j++) { const kk = Math.max(0, k - j * 0.08); ctx.globalAlpha = 0.35 - j * 0.09; ctx.fillStyle = '#eeeeee'; ctx.beginPath(); ctx.arc(p.x + (p.x2 - p.x) * kk, p.y + (p.y2 - p.y) * kk - Math.sin(kk * Math.PI) * 9, 3 + j, 0, 6.283); ctx.fill(); }
@@ -584,7 +599,12 @@
       } else if (p.t === 'flake') {
         if (lowDetail) continue;
         ctx.globalAlpha = 1 - k; ctx.fillStyle = '#ffffff'; AR.star(ctx, p.x + p.vx * age, p.y + p.vy * age, p.s, 6, 0.4); ctx.fill(); ctx.globalAlpha = 1;
+      } else if (p.t === 'burst') {
+        const sp = AR.splitBurst(), sc = (p.s / 32) * (0.45 + 0.8 * k);
+        ctx.globalAlpha = k < 0.5 ? 1 : (1 - k) * 2;
+        ctx.drawImage(sp.c, p.x - sp.w * sc / 2, p.y - sp.h * sc / 2, sp.w * sc, sp.h * sc); ctx.globalAlpha = 1;
       } else if (p.t === 'muzzle') {
+        if (p.txt === 'smelter') continue; // the lance tip is already white-hot; no muzzle star 4x a second
         if (lowDetail) {
           ctx.globalAlpha = 1 - k; ctx.fillStyle = p.txt === 'frost' ? '#c8f0ff' : '#ffe14a';
           ctx.beginPath(); ctx.arc(p.x, p.y, 4 * (1 - k * 0.5), 0, 6.283); ctx.fill(); ctx.globalAlpha = 1;
@@ -613,7 +633,7 @@
   }
   function drawTowerSprite(x, y, type, lvl, ang, kick, alpha, now, born, upAt) {
     const sp = AR.tower(type, lvl);
-    const kt = now - kick, recoil = kt < 140 ? (1 - kt / 140) * 3.5 : 0;
+    const kt = now - kick, recoil = kt < 140 ? (1 - kt / 140) * (type === 'smelter' ? 0.7 : 3.5) : 0; // the Smelter fires 4x/s: a hum, not a kick
     let sq = type === 'frost' && kt < 180 ? 1 + Math.sin((kt / 180) * Math.PI) * 0.12 : 1;
     if (born && now - born < 320) {
       const t = (now - born) / 320;
@@ -630,11 +650,6 @@
     else {
       if (type === 'frost' && lvl === 2) { ctx.fillStyle = `rgba(140,225,255,${0.1 + 0.06 * Math.sin(now / 300)})`; ctx.beginPath(); ctx.arc(x, y, 14, 0, 6.283); ctx.fill(); }
       ctx.drawImage(sp.c, x - (sp.w * sq) / 2, y - (sp.h / sq) / 2 - 2 + (sp.h - sp.h / sq) / 2, sp.w * sq, sp.h / sq);
-    }
-    // v0.6 PLACEHOLDER (Forge Art: delete once art.js draws a Smelter; until then it reuses the Arrow sprite): glowing core
-    if (type === 'smelter' && !(AR.hasTower && AR.hasTower('smelter'))) {
-      ctx.fillStyle = `rgba(255,${110 + lvl * 30},30,0.9)`; ctx.strokeStyle = AR.OUT; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(x, y, 5 + lvl * 1.5, 0, 6.283); ctx.fill(); ctx.stroke();
     }
     ctx.globalAlpha = 1;
   }
@@ -744,11 +759,6 @@
             const sp = AR.creep(kind, cr[8], R), w = sp.w * sq * hitSq, h = sp.h / sq / hitSq;
             ctx.drawImage(sp.c, px - w / 2, py - lift - h / 2 + (sp.h - h) * 0.3, w, h);
             if (hitK) { const f = AR.creepFlash(R); ctx.globalAlpha = 0.85 * hitK; ctx.drawImage(f.c, px - f.w * hitSq / 2, py - lift - f.h / 2, f.w * hitSq, f.h); ctx.globalAlpha = 1; }
-            // v0.6 PLACEHOLDER (Forge Art: delete once art.js draws Splitters/Shards): orange crack ring / ember dot
-            if ((kind === 'splitter' || kind === 'shard') && !(AR.hasCreep && AR.hasCreep(kind))) {
-              ctx.strokeStyle = '#ff8a3a'; ctx.lineWidth = kind === 'shard' ? 1.5 : 2.5; ctx.beginPath(); ctx.arc(px, py - lift, R * 0.9, 0, 6.283); ctx.stroke();
-              if (kind === 'splitter') { ctx.beginPath(); ctx.moveTo(px - R * 0.5, py - lift - R * 0.5); ctx.lineTo(px + R * 0.5, py - lift + R * 0.5); ctx.moveTo(px + R * 0.5, py - lift - R * 0.5); ctx.lineTo(px - R * 0.5, py - lift + R * 0.5); ctx.stroke(); }
-            }
             if (cr[6]) { const ic = lowDetail ? AR.creepIceLite(R) : AR.creepIce(R); ctx.drawImage(ic.c, px - ic.w / 2, py - lift - ic.h / 2, ic.w, ic.h); }
           }
         }
