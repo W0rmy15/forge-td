@@ -258,7 +258,7 @@ function handle(ws, msg) {
   // test-only: top up gold for screenshot/perf scripts (enabled only with FORGE_TEST_HOOKS=1)
   if (msg.t === 'debug_gold' && process.env.FORGE_TEST_HOOKS === '1') { G.addGold(p, 5000); return; }
   // test-only: jump the wave counter forward (so smoke tests can reach send-tier unlocks quickly)
-  if (msg.t === 'debug_wave' && process.env.FORGE_TEST_HOOKS === '1') { const n = Math.floor(+msg.wave); if (Number.isFinite(n) && n > room.game.wave && n < 40) room.game.wave = n; return; }
+  if (msg.t === 'debug_wave' && process.env.FORGE_TEST_HOOKS === '1') { const n = Math.floor(+msg.wave); if (Number.isFinite(n) && n > room.game.wave && n < 80) room.game.wave = n; return; }
   if (msg.t === 'debug_crash' && process.env.FORGE_TEST_HOOKS === '1') { room.game.boards.L.towers.set('0,0', { c: 0, r: 0, type: 'bogus', lvl: 0, cd: 0, sellAt: null }); return; }
   let err = null;
   switch (msg.t) {

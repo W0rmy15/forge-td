@@ -18,7 +18,7 @@ const ORDER = [];
 // upgrade share (defense may not dip into it); sends keep going from their own share.
 function botAct(room, p, strat, rng) {
   const g = room.game, B = g.boards[p.team];
-  const kinds = strat.kind === 'mix' ? ['runner', 'swarm', 'brute'] : [strat.kind];
+  const kinds = strat.kind === 'mix' ? ['runner', 'swarm', 'brute'] : strat.kind === 'mix5' ? ['runner', 'swarm', 'brute', 'splitter'] : [strat.kind];
   // send upgrades: the next tier of the lowest-tier kind this bot sends; while one is wanted the bot banks its send budget for it
   if (strat.up && strat.send > 0 && g.wave >= (strat.upWave || 4)) {
     const k = kinds.slice().sort((a, b) => G.tierOf(p, a) - G.tierOf(p, b))[0];
@@ -55,7 +55,9 @@ function botAct(room, p, strat, rng) {
   for (let guard = 0; guard < 4; guard++) {
     const mine = [...B.towers.values()].filter((t) => t.owner === p.id && t.sellAt === null);
     const need = Math.min(ORDER.length, strat.need === 'up' ? 4 + g.wave : strat.need === 'wall' ? 6 + 3 * g.wave : 5 + 2 * g.wave);
-    const types = strat.tower === 'mix' ? ['arrow', 'arrow', 'cannon', 'frost'] : [strat.tower];
+    // v0.6: 'mix5' = mix + one Smelter per cycle, 'smelterHeavy' = mostly Smelters with a Frost and a Cannon
+    const types = strat.tower === 'mix' ? ['arrow', 'arrow', 'cannon', 'frost'] : strat.tower === 'mix5' ? ['arrow', 'arrow', 'cannon', 'frost', 'smelter']
+      : strat.tower === 'smelterHeavy' ? ['smelter', 'smelter', 'frost', 'smelter', 'cannon'] : [strat.tower];
     const type = types[p._tidx % types.length];
     const cands = ORDER.filter(([c, r]) => !B.towers.has(c + ',' + r) && !p._failed.has(c + ',' + r));
     const wantBuild = cands.length && (B.towers.size < need || mine.every((t) => t.lvl === 2));

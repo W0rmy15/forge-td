@@ -19,7 +19,8 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
   check('build arrow', G.build(room, p, 'arrow', 2, 5) === null);
   check('board idle before wave 1 -> sale is immediate', G.sell(room, p, 2, 5) === null && !b.towers.has('2,5'));
   G.build(room, p, 'arrow', 2, 5); G.build(room, p, 'arrow', 3, 5);
-  step(room, 21); // wave 1 spawning
+  step(room, S.FIRST_WAVE + 1); // wave 1 spawning
+  for (const c of b.creeps) { c.hp = c.maxHp = 5000; } for (const q of b.queue) q.hp = 5000; // tough enough to keep the board busy
   check('board busy during wave', G.boardBusy(g, b) === true, { creeps: b.creeps.length, queued: b.queue.length });
   const gold0 = p.gold;
   check('sell on busy board queues (tower stays)', G.sell(room, p, 2, 5) === null && b.towers.has('2,5') && b.towers.get('2,5').sellAt !== null);
@@ -45,10 +46,13 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
   const want2 = S.sendTeamMult(2, 12);
   check('2v2 send HP = sendTeamMult(2, wave) x 1v1 send HP', Math.abs(h2 / h1 - want2) < 0.02, { h1, h2, want: want2 });
   check('runner HP = 2.1 x wave HP x ramp at wave 12', Math.abs(h1 - 2.1 * S.waveHp(12) * S.sendRamp(12)) <= 1, { h1, wave: S.waveHp(12), ramp: S.sendRamp(12) });
-  check('send ramp: wave 1 = 0.26x, wave 14+ = 1x', Math.abs(S.sendRamp(1) - 0.26) < 1e-9 && S.sendRamp(13) < 1 && S.sendRamp(14) === 1 && S.sendRamp(20) === 1);
+  const rf = S.sendRampFullWave();
+  check(`send ramp: wave 1 = ${S.SEND_RAMP.START + S.SEND_RAMP.PER_WAVE}x, wave ${rf}+ = 1x`, Math.abs(S.sendRamp(1) - S.SEND_RAMP.START - S.SEND_RAMP.PER_WAVE) < 1e-9 && S.sendRamp(rf - 1) < 1 && S.sendRamp(rf) === 1 && S.sendRamp(rf + 6) === 1);
   check('bounties Runner 9 / Swarm 3 / Brute 24', S.SENDS.runner.bounty === 9 && S.SENDS.swarm.bounty === 3 && S.SENDS.brute.bounty === 24);
-  check('2v2 team scale eases 2.0 (wave 1) -> 2.3 (wave 14+), 1v1 = 1', S.teamScale(1, 12) === 1 && Math.abs(S.teamScale(2, 1) - 2.0) < 1e-9 && Math.abs(S.teamScale(2, 14) - 2.3) < 1e-9 && Math.abs(S.teamScale(2, 30) - 2.3) < 1e-9);
-  check(`2v2 send multiplier: x${S.SEND_TEAM2.START} to wave 6, x2.99 (2.3 x 1.3) from wave 16, 1v1 = 1`, S.sendTeamMult(1, 20) === 1 && S.sendTeamMult(2, 1) === S.SEND_TEAM2.START && S.sendTeamMult(2, 6) === S.SEND_TEAM2.START && Math.abs(S.sendTeamMult(2, 16) - 2.99) < 1e-9 && Math.abs(S.sendTeamMult(2, 30) - 2.99) < 1e-9);
+  const tw = S.TEAM2_SCALE_WAVE;
+  check(`2v2 team scale eases 2.0 (wave 1) -> 2.3 (wave ${tw}+), 1v1 = 1`, S.teamScale(1, 12) === 1 && Math.abs(S.teamScale(2, 1) - 2.0) < 1e-9 && Math.abs(S.teamScale(2, tw) - 2.3) < 1e-9 && Math.abs(S.teamScale(2, tw + 16) - 2.3) < 1e-9);
+  const T2 = S.SEND_TEAM2;
+  check(`2v2 send multiplier: x${T2.START} to wave ${T2.FROM}, x2.99 (2.3 x 1.3) from wave ${T2.FULL}, 1v1 = 1`, S.sendTeamMult(1, 20) === 1 && S.sendTeamMult(2, 1) === T2.START && S.sendTeamMult(2, T2.FROM) === T2.START && Math.abs(S.sendTeamMult(2, T2.FULL) - 2.99) < 1e-9 && Math.abs(S.sendTeamMult(2, T2.FULL + 14) - 2.99) < 1e-9);
   check('send HP multipliers 2.1 / 0.9 / 10.5 (QA T10)', S.SENDS.runner.hpMult === 2.1 && S.SENDS.swarm.hpMult === 0.9 && S.SENDS.brute.hpMult === 10.5);
 }
 // --- unlimited sends + send lane ---
@@ -145,7 +149,7 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
 // --- v0.5.2: send-tier income x SEND_TEAM2_INCOME in 2v2, unscaled in 1v1 ---
 {
   for (const n of [1, 2]) {
-    const room = mkRoom(n), g = room.game, p = room.players.get(1); p.gold = 1e6; g.wave = 8;
+    const room = mkRoom(n), g = room.game, p = room.players.get(1); p.gold = 1e6; g.wave = S.SEND_UP.UNLOCK_WAVE[1];
     const inc0 = p.income + p.incomeFrac, cost = S.sendUpCost('brute', 0); G.upgradeSend(room, p, 'brute');
     const want = cost * S.SEND_UP.INCOME_PER_GOLD * (n >= 2 ? S.SEND_TEAM2_INCOME : 1);
     check(`${n}v${n}: send-tier income gain ${+want.toFixed(4)}`, Math.abs(p.income + p.incomeFrac - inc0 - want) < 1e-9, { gain: +(p.income + p.incomeFrac - inc0).toFixed(4) });
@@ -153,23 +157,24 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
 }
 // --- v0.4: send upgrades ---
 {
+  const UW = S.SEND_UP.UNLOCK_WAVE;
   const room = mkRoom(), g = room.game, p = room.players.get(1); p.gold = 1e6; g.wave = 1;
   check('upgrade: unknown / prototype kinds rejected', ['__proto__', 'constructor', 'toString', 'hasOwnProperty', 'neutral', 'boss', '', null, 7].every((k) => G.upgradeSend(room, p, k) === 'Unknown send'));
-  check('upgrade: locked before wave 8', /unlocks at wave 8/.test(G.upgradeSend(room, p, 'runner') || ''));
-  g.wave = 8; const poor = room.players.get(2); poor.gold = 10;
+  check(`upgrade: locked before wave ${UW[1]}`, new RegExp('unlocks at wave ' + UW[1]).test(G.upgradeSend(room, p, 'runner') || ''));
+  g.wave = UW[1]; const poor = room.players.get(2); poor.gold = 10;
   check('upgrade: not enough gold', G.upgradeSend(room, poor, 'runner') === 'Not enough gold' && poor.gold === 10);
   const g0 = p.gold, inc0 = p.income;
-  check(`upgrade: tier 1 bought at wave 8 for ${S.SEND_UP.UP_COST[1]}x base cost`, G.upgradeSend(room, p, 'runner') === null && G.tierOf(p, 'runner') === 1 && g0 - p.gold === S.sendUpCost('runner', 0) && S.sendUpCost('runner', 0) === Math.round(35 * S.SEND_UP.UP_COST[1]));
+  check(`upgrade: tier 1 bought at wave ${UW[1]} for ${S.SEND_UP.UP_COST[1]}x base cost`, G.upgradeSend(room, p, 'runner') === null && G.tierOf(p, 'runner') === 1 && g0 - p.gold === S.sendUpCost('runner', 0) && S.sendUpCost('runner', 0) === Math.round(35 * S.SEND_UP.UP_COST[1]));
   check('upgrade: gives a little income (cost x INCOME_PER_GOLD, carried fraction)', p.income + p.incomeFrac - inc0 > 0 && Math.abs(p.income + p.incomeFrac - inc0 - S.sendUpCost('runner', 0) * S.SEND_UP.INCOME_PER_GOLD) < 1e-9, { inc0, inc: p.income, frac: p.incomeFrac });
-  check('upgrade: tier 2 locked until wave 12', /unlocks at wave 12/.test(G.upgradeSend(room, p, 'runner') || ''));
-  g.wave = 16; G.upgradeSend(room, p, 'runner'); G.upgradeSend(room, p, 'runner');
+  check(`upgrade: tier 2 locked until wave ${UW[2]}`, new RegExp('unlocks at wave ' + UW[2]).test(G.upgradeSend(room, p, 'runner') || ''));
+  g.wave = UW[3]; G.upgradeSend(room, p, 'runner'); G.upgradeSend(room, p, 'runner');
   check('upgrade: max tier 3', G.tierOf(p, 'runner') === 3 && /max tier/.test(G.upgradeSend(room, p, 'runner') || ''));
   check('upgrade: tiers are per player and per kind', G.tierOf(p, 'brute') === 0 && G.tierOf(room.players.get(2), 'runner') === 0);
   check('upgrade: tier map has no prototype', Object.getPrototypeOf(p.sendTier) === null);
   p.sendTier.runner = 99; check('tierOf clamps a bad stored tier', G.tierOf(p, 'runner') === 3); p.sendTier.runner = 3;
   G.doSend(room, p, 'runner'); const q = g.boards.R.queue.filter((x) => x.from).pop();
-  check('T3 runner: HP x1.85, speed x1.35, price x1.3', Math.abs(q.hp - Math.round(S.sendHp('runner', 16, 1, 0) * 1.85)) <= 2 && Math.abs(q.speed - S.SENDS.runner.speed * 1.35) < 1e-9 && S.sendSpec('runner', 3).cost === Math.round(35 * 1.3), { hp: q.hp, base: S.sendHp('runner', 16, 1, 0), speed: q.speed });
-  g.wave = 16; for (let i = 0; i < 3; i++) G.upgradeSend(room, p, 'swarm');
+  check('T3 runner: HP x1.85, speed x1.35, price x1.3', Math.abs(q.hp - Math.round(S.sendHp('runner', UW[3], 1, 0) * 1.85)) <= 2 && Math.abs(q.speed - S.SENDS.runner.speed * 1.35) < 1e-9 && S.sendSpec('runner', 3).cost === Math.round(35 * 1.3), { hp: q.hp, base: S.sendHp('runner', UW[3], 1, 0), speed: q.speed });
+  g.wave = UW[3]; for (let i = 0; i < 3; i++) G.upgradeSend(room, p, 'swarm');
   const before = g.boards.R.queue.length; G.doSend(room, p, 'swarm');
   check(`T3 swarm sends ${S.SEND_TRAITS.swarm.count[3]} creeps`, g.boards.R.queue.length - before === S.SEND_TRAITS.swarm.count[3]);
   for (let i = 0; i < 3; i++) G.upgradeSend(room, p, 'brute');
@@ -211,6 +216,71 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
   g.boards.L.lives = 0; g.boards.L.rawLives = -2; g.boards.R.lives = 0; g.boards.R.rawLives = -2;
   G.stepGame(room); G.stepGame(room);
   check('identical lives lost and kills -> draw', room.phase === 'over' && g.winner === 'draw', { w: g.winner, r: g.winReason });
+}
+// --- v0.6: wave timer, later + harder sudden death ---
+{
+  const room = mkRoom(), g = room.game; let w1 = null, w2 = null;
+  for (let i = 0; i < 2000 && w2 === null; i++) { G.stepGame(room); for (const e of g.events) if (e.k === 'wave') { if (e.n === 1) w1 = g.time; if (e.n === 2) w2 = g.time; } g.events.length = 0; }
+  check(`wave 1 at ${S.FIRST_WAVE}s, then every ${S.WAVE_EVERY}s`, Math.abs(w1 - S.FIRST_WAVE) < 0.06 && Math.abs(w2 - w1 - S.WAVE_EVERY) < 0.06, { w1, w2 });
+  const sdMin = S.waveStartSec(S.WAVE.SUDDEN_DEATH_WAVE) / 60;
+  check(`sudden death starts at ${sdMin.toFixed(1)} min (target 14-15)`, sdMin >= 14 && sdMin <= 15);
+  const r2 = mkRoom(), g2 = r2.game; g2.wave = S.WAVE.SUDDEN_DEATH_WAVE - 1; g2.nextWave = 0.01; G.stepGame(r2);
+  const q = g2.boards.L.queue.find((x) => x.kind === 'neutral');
+  const wantHp = Math.round(S.waveHp(S.WAVE.SUDDEN_DEATH_WAVE) * S.WAVE.SUDDEN_DEATH_GROWTH);
+  check(`first SD wave: fast, x${S.WAVE.SUDDEN_DEATH_GROWTH} HP, leaks cost ${S.WAVE.SUDDEN_DEATH_LEAK_MULT}`, q.speed === S.WAVE.FAST_SPEED && Math.abs(q.hp - wantHp) <= 1 && q.leak === S.WAVE.SUDDEN_DEATH_LEAK_MULT, { hp: q.hp, wantHp, speed: q.speed, leak: q.leak });
+}
+// --- v0.6: Slag Splitter ---
+{
+  const room = mkRoom(), g = room.game, p = room.players.get(1), b = g.boards.R; p.gold = 1e6; g.wave = 20;
+  check('splitter is a sendable kind', G.doSend(room, p, 'splitter') === null);
+  const q = b.queue.find((x) => x.kind === 'splitter');
+  check('splitter send carries its shard count', q && q.shards === S.SPLIT.SHARDS[0] && q.hp === S.sendHp('splitter', 20, 1, 0), q);
+  g.time = q.at; g.nextWave = 1e9; G.stepGame(room); g.events.length = 0;
+  const cr = b.creeps.find((c) => c.kind === 'splitter'); const R2 = room.players.get(2); R2.gold = 1e6;
+  for (let i = 0; i < 40; i++) G.stepGame(room); g.events.length = 0; // walk a bit
+  const t = { type: 'arrow', owner: 2, id: 99 }; const at = { c: cr.c, r: cr.r, x: cr.x, y: cr.y };
+  G._damage(room, b, cr, 1e9, t, g);
+  const ev = g.events.find((e) => e.k === 'split');
+  check('killing a splitter emits a split event', ev && ev.n === S.SPLIT.SHARDS[0] && ev.b === 'R', ev);
+  check('shards wait until the towers have fired (b.born)', b.born && b.born.length === S.SPLIT.SHARDS[0] && !b.creeps.some((c) => c.kind === 'shard'));
+  G.stepGame(room);
+  const sh = b.creeps.filter((c) => c.kind === 'shard');
+  const wantHp = Math.round(cr.maxHp * S.SPLIT.SHARD_HP);
+  check(`${S.SPLIT.SHARDS[0]} shards with ${S.SPLIT.SHARD_HP * 100}% HP each, fast, next to the parent`, sh.length === S.SPLIT.SHARDS[0] && sh.every((c) => c.maxHp === wantHp && c.speed === S.SPLIT.SHARD_SPEED && Math.hypot(c.x - at.x, c.y - at.y) < 0.6 && !c.shards && c.from === cr.from), sh.map((c) => [c.maxHp, c.speed, +c.x.toFixed(2), +c.y.toFixed(2)]));
+  const n0 = g.events.length; G._damage(room, b, sh[0], 1e9, t, g);
+  check('shards never split again', !g.events.slice(n0).some((e) => e.k === 'split'));
+  // T3 splitter: 4 shards
+  for (let i = 0; i < 3; i++) { g.wave = S.SEND_UP.UNLOCK_WAVE[i + 1]; G.upgradeSend(room, p, 'splitter'); }
+  check('T3 splitter sends 4 shards', S.sendSpec('splitter', 3).shards === 4 && G.tierOf(p, 'splitter') === 3);
+  // neutral split waves
+  const sw = []; for (let n = 1; n <= 40; n++) if (S.isSplitWave(n)) sw.push(n);
+  check('neutral Splitter waves exist and are never boss waves', sw.length >= 5 && sw.every((n) => !S.isBossWave(n)), sw);
+  const r3 = mkRoom(), g3 = r3.game; g3.wave = sw[0] - 1; g3.nextWave = 0.01; G.stepGame(r3);
+  const nq = g3.boards.L.queue.concat(g3.boards.L.creeps);
+  check(`wave ${sw[0]} mixes in Splitters`, nq.some((x) => x.kind === 'splitter') && nq.some((x) => x.kind === 'neutral'));
+}
+// --- v0.6: Smelter heat ramp ---
+{
+  const room = mkRoom(), g = room.game, p = room.players.get(1), b = g.boards.L; p.gold = 1e6;
+  check('build smelter', G.build(room, p, 'smelter', 4, 3) === null);
+  const st = S.TOWERS.smelter.levels[0];
+  const mk = (id, y) => ({ id, kind: 'brute', hp: 1e6, maxHp: 1e6, speed: 0, bounty: 1, leak: 1, radius: 0.3, v: 0, arrowMult: 1, slowResist: 0, shards: 0, c: 5, r: Math.floor(y), nc: null, nr: null, x: 5.5, y, slowUntil: 0, slowAmt: 0, from: null });
+  const a = mk(9001, 3.5), c = mk(9002, 2.5); b.creeps.push(a);
+  g.nextWave = 1e9; const hits = [];
+  for (let i = 0; i < 80; i++) { const h0 = a.hp; G.stepGame(room); if (a.hp < h0) hits.push(+(h0 - a.hp).toFixed(2)); g.events.length = 0; }
+  check(`smelter ramps x1 -> x${st.heatMax} in ${st.heatTime}s on one target`, Math.abs(hits[0] - st.dmg) < 1e-6 && Math.abs(hits[hits.length - 1] - st.dmg * st.heatMax) < 1e-6 && hits[3] > hits[1], hits.slice(0, 12));
+  const tw = [...b.towers.values()][0]; a.hp = 0; b.creeps.push(c);
+  const h0 = c.hp; for (let i = 0; i < 6; i++) { G.stepGame(room); g.events.length = 0; }
+  check('heat resets when it switches target', tw.lock === c.id && h0 - c.hp <= st.dmg * S.heatMult(st, st.rate) * 2 + 1e-6, { lock: tw.lock, dealt: h0 - c.hp });
+}
+// --- v0.6: wire format for the new units ---
+{
+  const W = require('../wire.js');
+  const { sh, ev } = W.splitEvents([{ k: 'shot', b: 'R', tt: 'smelter', x1: 4.5, y1: 3.5, x2: 5.5, y2: 4.2, h: 3 }, { k: 'shot', b: 'L', tt: 'frost', x1: 1.5, y1: 2.5, x2: 1.5, y2: 3 }, { k: 'split', b: 'L', x: 1, y: 2, n: 3 }]);
+  const m = S.decodeState({ t: 's', sh, ev, boards: { L: { creeps: [[1, S.WIRE.KINDS.indexOf('splitter'), 55, 25, 10, 20, 0, 3], [2, S.WIRE.KINDS.indexOf('shard'), 55, 25, 3, 5, 0, 3]] }, R: { creeps: [] } } });
+  const s0 = m.ev[0], s1 = m.ev[1];
+  check('wire: smelter shot keeps board, type and heat stage', s0.b === 'R' && s0.tt === 'smelter' && s0.h === 3 && s1.b === 'L' && s1.tt === 'frost' && s1.h === 0 && m.ev[2].k === 'split', m.ev);
+  check('wire: splitter / shard kinds and radius decode', m.boards.L.creeps[0][1] === 'splitter' && m.boards.L.creeps[1][1] === 'shard' && m.boards.L.creeps[1][7] === S.CREEP_RADIUS.shard, m.boards.L.creeps);
 }
 console.log(fails ? `SIM TESTS: ${fails} FAILED` : 'SIM TESTS: ALL PASS');
 process.exit(fails ? 1 : 0);

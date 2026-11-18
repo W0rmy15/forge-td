@@ -1,6 +1,7 @@
 // Forge TD towers: build / upgrade / sell (incl. queued sales), targeting, firing, damage and slow.
 const S = require('../public/shared.js');
 const { key, addGold, canBuild, recomputeDist, DT } = require('./core.js');
+const { splitShards } = require('./waves.js');
 
 function build(room, p, type, c, r) {
   const g = room.game, b = g.boards[p.team];
@@ -94,6 +95,7 @@ function damage(room, b, cr, dmg, tower, g) {
     if (owner) { addGold(owner, cr.bounty); owner.kills++; }
     tower.kills = (tower.kills || 0) + 1;
     g.events.push({ k: 'kill', b: b.team, x: +cr.x.toFixed(2), y: +cr.y.toFixed(2), kind: cr.kind, v: cr.v, g: cr.bounty, o: tower.owner });
+    if (cr.shards) splitShards(g, b, cr); // v0.6 Splitter
   }
 }
 
@@ -129,17 +131,29 @@ function fireTowers(room, b) {
     const st = S.TOWERS[t.type].levels[t.lvl];
     const tx = t.c + 0.5, ty = t.r + 0.5;
     let target = null, best = Infinity;
-    for (const cr of b.creeps) {
+    // v0.6 Smelter: keeps burning its locked target while it is alive and in range
+    if (t.type === 'smelter' && t.lock) {
+      const lk = b.creeps.find((cr) => cr.id === t.lock);
+      if (lk && lk.hp > 0 && Math.hypot(lk.x - tx, lk.y - ty) <= st.range) target = lk;
+    }
+    if (!target) for (const cr of b.creeps) {
       if (cr.hp <= 0) continue;
       if (Math.hypot(cr.x - tx, cr.y - ty) > st.range) continue;
       const prog = b.dist[cr.c + cr.r * S.COLS];
       const score = (prog < 0 ? 999 : prog) - (cr.hp / cr.maxHp) * 0.01;
       if (score < best) { best = score; target = cr; }
     }
-    if (!target) continue;
+    if (!target) { if (t.type === 'smelter') { t.lock = null; t.heat = 0; } continue; }
     t.cd = st.rate;
-    g.events.push({ k: 'shot', b: team, tt: t.type, x1: +tx.toFixed(2), y1: +ty.toFixed(2), x2: +target.x.toFixed(2), y2: +target.y.toFixed(2) });
-    if (t.type === 'cannon') {
+    const shot = { k: 'shot', b: team, tt: t.type, x1: +tx.toFixed(2), y1: +ty.toFixed(2), x2: +target.x.toFixed(2), y2: +target.y.toFixed(2) };
+    g.events.push(shot);
+    if (t.type === 'smelter') {
+      if (t.lock !== target.id) { t.lock = target.id; t.heat = 0; }
+      const mult = S.heatMult(st, t.heat);
+      shot.h = Math.min(3, Math.floor((mult - 1) / (st.heatMax - 1) * 3 + 1e-9)); // heat stage 0..3 for the beam visual
+      damage(room, b, target, st.dmg * mult, t, g);
+      t.heat += st.rate;
+    } else if (t.type === 'cannon') {
       for (const cr of b.creeps) if (cr.hp > 0 && Math.hypot(cr.x - target.x, cr.y - target.y) <= st.splash) damage(room, b, cr, st.dmg, t, g);
       g.events.push({ k: 'boom', b: team, x: +target.x.toFixed(2), y: +target.y.toFixed(2), r: st.splash });
     } else if (t.type === 'frost') {

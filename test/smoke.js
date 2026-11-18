@@ -3,6 +3,7 @@
 // Usage: node test/smoke.js http://localhost:PORT   (fresh server; run it before other tests so the per-IP cap isn't hit)
 const puppeteer = require(process.env.PUPPETEER_PATH || 'puppeteer-core');
 const S = require('../public/shared.js');
+const UW1 = S.SEND_UP.UNLOCK_WAVE[1];
 const URL_ = process.argv[2] || 'http://localhost:8721';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let fails = 0; const check = (n, ok, info) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${info !== undefined ? '  ' + JSON.stringify(info) : ''}`); if (!ok) fails++; };
@@ -91,20 +92,20 @@ let fails = 0; const check = (n, ok, info) => { console.log(`${ok ? 'PASS' : 'FA
     check('sale queued: panel says so, tower still on board', /Sale queued/.test(selTxt) && flagged === 1, { selTxt: selTxt.slice(0, 120), flagged }); }
   // send upgrades (v0.4): locked before the unlock wave, Shift+Q refused with a reason, enemy tiers panel
   { const upTxt = await A.$eval('#sendBtns', (e) => e.textContent);
-    check('send upgrade buttons show locked tier 1 before wave 8', /🔒 T1 @ wave 8/.test(upTxt), upTxt.replace(/\s+/g, ' ').slice(0, 160));
+    check(`send upgrade buttons show locked tier 1 before wave ${UW1}`, new RegExp('🔒 T1 @ wave ' + UW1).test(upTxt), upTxt.replace(/\s+/g, ' ').slice(0, 160));
     await A.keyboard.down('Shift'); await A.keyboard.press('Q'); await A.keyboard.up('Shift'); await sleep(500);
     const tt = await A.evaluate(() => [document.getElementById('toast').textContent, ...window.__ftdToasts().queued].join(' | '));
-    check('Shift+Q before unlock is refused by the server with a reason', /unlocks at wave 8/.test(tt), tt);
+    check('Shift+Q before unlock is refused by the server with a reason', new RegExp('unlocks at wave ' + UW1).test(tt), tt);
     const et = await B.$eval('#enemyTiers', (e) => e.textContent);
     check('enemy send tiers panel lists the opponent', /Alice/.test(et), et);
-    // with FORGE_TEST_HOOKS=1, jump to wave 8 and buy a real tier
+    // with FORGE_TEST_HOOKS=1, jump to the tier-1 unlock wave and buy a real tier
     const g0 = +(await A.$eval('#gold', (e) => e.textContent));
-    await A.evaluate(() => { const s = window.__sockets[window.__sockets.length - 1]; s.send(JSON.stringify({ t: 'debug_gold' })); s.send(JSON.stringify({ t: 'debug_wave', wave: 8 })); }); await sleep(600);
+    await A.evaluate((w) => { const s = window.__sockets[window.__sockets.length - 1]; s.send(JSON.stringify({ t: 'debug_gold' })); s.send(JSON.stringify({ t: 'debug_wave', wave: w })); }, UW1); await sleep(600);
     const g1 = +(await A.$eval('#gold', (e) => e.textContent));
     if (g1 - g0 < 4000) console.log('SKIP  send-tier purchase flow (server not started with FORGE_TEST_HOOKS=1)');
     else {
       const u = await A.$eval('#sendBtns', (e) => e.textContent);
-      check('upgrade button unlocked at wave 8 with its price', new RegExp('⬆ T1 · ' + S.sendUpCost('runner', 0) + 'g').test(u), u.replace(/\s+/g, ' ').slice(0, 160));
+      check(`upgrade button unlocked at wave ${UW1} with its price`, new RegExp('⬆ T1 · ' + S.sendUpCost('runner', 0) + 'g').test(u), u.replace(/\s+/g, ' ').slice(0, 160));
       await A.keyboard.down('Shift'); await A.keyboard.press('Q'); await A.keyboard.up('Shift'); await sleep(600);
       const tier = await A.evaluate(() => window.__ftdState().players.find((p) => p.name === 'Alice').tiers.runner);
       const t2 = await A.evaluate(() => [document.getElementById('toast').textContent, ...window.__ftdToasts().queued].join(' | '));

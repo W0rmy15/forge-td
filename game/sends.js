@@ -32,7 +32,7 @@ function doSend(room, p, kind) {
   b.sendAt = start + base.lane * S.SEND_LANE_MULT;
   for (let i = 0; i < spec.count; i++) {
     b.queue.push({ at: start + i * base.gap, kind, v: tier, hp, speed: spec.speed, bounty, leak: base.leak, radius: base.radius,
-      arrowMult: spec.arrowMult, slowResist: spec.slowResist, from: p.id });
+      arrowMult: spec.arrowMult, slowResist: spec.slowResist, shards: spec.shards, from: p.id });
   }
   g.events.push({ k: 'send', team: p.team, kind, tier, name: p.name, id: p.id, n: p.sent });
   return null;

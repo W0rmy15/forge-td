@@ -140,7 +140,7 @@
   const buildBtns = {}, sendBtns = {}, upBtns = {};
   const AIcon = window.ART, iconCache = {};
   const towerIcon = (k) => iconCache['t' + k] || (iconCache['t' + k] = AIcon.iconURL(AIcon.tower(k, 0), 48, 1.28));
-  const creepIcon = (k, tier) => iconCache['c' + k + tier] || (iconCache['c' + k + tier] = AIcon.iconURL(AIcon.creep(k, tier, k === 'swarm' ? 7 : k === 'brute' ? 9.5 : 8), 48, 1.32));
+  const creepIcon = (k, tier) => iconCache['c' + k + tier] || (iconCache['c' + k + tier] = AIcon.iconURL(AIcon.creep(k, tier, k === 'swarm' ? 7 : k === 'brute' ? 9.5 : k === 'splitter' ? 9 : 8), 48, 1.32));
   const pips = (t) => '<span class="pips">' + [1, 2, 3].map((i) => `<i class="${i <= t ? 'on' : ''}"></i>`).join('') + '</span>';
   for (const [k, t] of Object.entries(S.TOWERS)) {
     const b = document.createElement('button');
@@ -257,7 +257,8 @@
       else if (e.k === 'sudden') aud('sudden');
       else if (e.k === 'finishing') aud('finishing');
       else if (e.k === 'income') aud('income', { volume: 0.45 });
-      if (e.k === 'shot' || e.k === 'boom' || e.k === 'chill' || e.k === 'kill') fxEvent(e);
+      else if (e.k === 'split') aud('split', { board: e.b, x: e.x, n: e.n }); // v0.6 Splitter burst
+      if (e.k === 'shot' || e.k === 'boom' || e.k === 'chill' || e.k === 'kill' || e.k === 'split') fxEvent(e);
       else if (e.k === 'leak') fxEvent(e);
       else if (e.k === 'sendup') {
         const nm = S.SENDS[e.kind].name, tr = S.SEND_TRAITS[e.kind].desc[e.tier];
@@ -265,7 +266,7 @@
         else if (e.team === m.team) toast(`${e.name} upgraded ${nm} to tier ${e.tier}`, true, 'teamup');
         else toast(`⚠ ${e.name} upgraded ${nm} to tier ${e.tier}: ${tr}`, false, 'enemyup' + e.kind);
       }
-      else if (e.k === 'sudden') toast(`SUDDEN DEATH: every wave now gets ×${S.WAVE.SUDDEN_DEATH_GROWTH} more HP!`, false, 'sudden');
+      else if (e.k === 'sudden') toast(`SUDDEN DEATH: every wave is fast, gets ×${S.WAVE.SUDDEN_DEATH_GROWTH} more HP, and leaks cost ${S.WAVE.SUDDEN_DEATH_LEAK_MULT}♥!`, false, 'sudden');
       else if (e.k === 'finishing') toast(e.fell === 'both' ? 'Both bases fell! Finishing the wave…' : e.fell === m.team ? 'Your base fell! Finishing the wave: fewer total lives lost still wins' : 'Enemy base fell! Finishing the wave…', false, 'fin');
       else if (e.k === 'send' && e.id === you) { toast(`Sent ${e.tier ? 'T' + e.tier + ' ' : ''}${S.SENDS[e.kind].name}${S.sendSpec(e.kind, e.tier).count > 1 ? ' ×' + S.sendSpec(e.kind, e.tier).count : ''} (${e.n} sent this game)`, true, 'mysend'); flashBtn(sendBtns[e.kind]); }
       else if (e.k === 'send' && e.team === m.team) toast(`${e.name} sent ${S.SENDS[e.kind].name}`, true, 'teamsend');
@@ -307,7 +308,7 @@
       txt = s.fin.fell === 'both' ? '⚖️ Both bases fell — finishing the wave. Fewer total lives lost wins.'
         : `⚖️ ${s.fin.fell === m.team ? 'Your' : 'The enemy'} base fell — finishing wave ${s.fin.wave}. Fewer total lives lost (overkill counts) wins.`;
       cls = 'fin';
-    } else if (s.sd) txt = `☠️ SUDDEN DEATH — each wave gets ×${S.WAVE.SUDDEN_DEATH_GROWTH} extra HP. If a base falls, the wave is finished and fewer lives lost wins.`;
+    } else if (s.sd) txt = `☠️ SUDDEN DEATH — fast waves, ×${S.WAVE.SUDDEN_DEATH_GROWTH} extra HP each, leaks cost ${S.WAVE.SUDDEN_DEATH_LEAK_MULT}♥. If a base falls, the wave is finished and fewer lives lost wins.`;
     else if (s.wave >= S.WAVE.SUDDEN_DEATH_WAVE - 3) { txt = `Sudden death starts at wave ${S.WAVE.SUDDEN_DEATH_WAVE}`; cls = 'soon'; }
     if (el.dataset.txt !== txt) { el.dataset.txt = txt; el.textContent = txt; el.className = 'banner' + (cls ? ' ' + cls : '') + (txt ? '' : ' hidden'); }
   }
@@ -520,8 +521,8 @@
   function fxEvent(e) {
     const now = performance.now();
     if (e.k === 'shot') {
-      const p = spawnP('proj', bx(e.b, e.x1), by(e.y1), e.tt === 'cannon' ? 230 : e.tt === 'frost' ? 170 : 110);
-      if (p) { p.x2 = bx(e.b, e.x2); p.y2 = by(e.y2); p.txt = e.tt; p.rot = Math.atan2(p.y2 - p.y, p.x2 - p.x); }
+      const p = spawnP('proj', bx(e.b, e.x1), by(e.y1), e.tt === 'cannon' ? 230 : e.tt === 'frost' ? 170 : e.tt === 'smelter' ? 260 : 110);
+      if (p) { p.x2 = bx(e.b, e.x2); p.y2 = by(e.y2); p.txt = e.tt; p.rot = Math.atan2(p.y2 - p.y, p.x2 - p.x); p.a = e.h || 0; }
     } else if (e.k === 'boom') {
       const x = bx(e.b, e.x), y = by(e.y), r = e.r * CELL;
       const ring = spawnP('ring', x, y, 260); if (ring) { ring.s = r; ring.col = '255,190,60'; }
@@ -539,6 +540,8 @@
       const n = (big ? 12 : e.kind === 'swarm' ? 5 : 8) >> (lowDetail ? 1 : 0);
       for (let i = 0; i < n; i++) { const a = (i / n) * 6.28 + Math.random() * 0.5, sp = 0.05 + Math.random() * 0.07; const p = spawnP('conf', x, y, 420 + Math.random() * 250); if (p) { p.vx = Math.cos(a) * sp; p.vy = Math.sin(a) * sp - 0.03; p.col = i % 3 === 0 ? '#ffffff' : col; p.s = 1.8 + Math.random() * 2; p.vr = (Math.random() - 0.5) * 0.03; } }
       if (e.o === you) { const t = spawnP('text', x, y - 6, 900); if (t) { t.txt = '+' + e.g; t.col = '#ffd23a'; t.s = e.g >= 10 ? 15 : 12; } }
+    } else if (e.k === 'split') { // v0.6 PLACEHOLDER (Forge Art: replace): a small orange ring where a Splitter burst
+      const ring = spawnP('ring', bx(e.b, e.x), by(e.y), 240); if (ring) { ring.s = CELL * 0.6; ring.col = '255,140,50'; }
     } else if (e.k === 'leak') {
       const t = spawnP('text', bx(e.team, S.BASE.c + 0.5), by(S.BASE.r) - 4, 1000); if (t) { t.txt = '-' + e.n + ' ♥'; t.col = '#ff4d6d'; t.s = 15; }
     }
@@ -550,7 +553,10 @@
       if (k >= 1) { freeP(p); continue; }
       if (p.t === 'proj') {
         const x = p.x + (p.x2 - p.x) * k, y = p.y + (p.y2 - p.y) * k;
-        if (p.txt === 'cannon') {
+        if (p.txt === 'smelter') { // v0.6 PLACEHOLDER (Forge Art: replace): heat beam, thicker/brighter with heat stage p.a (0..3)
+          ctx.strokeStyle = `rgba(255,${150 - p.a * 30},40,${0.55 + p.a * 0.12})`; ctx.lineWidth = 2 + p.a * 1.5;
+          ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x2, p.y2); ctx.stroke();
+        } else if (p.txt === 'cannon') {
           const lift = Math.sin(k * Math.PI) * 9, sc = 1 + Math.sin(k * Math.PI) * 0.35, sp = AR.ball();
           for (let j = 1; j <= 3; j++) { const kk = Math.max(0, k - j * 0.08); ctx.globalAlpha = 0.35 - j * 0.09; ctx.fillStyle = '#eeeeee'; ctx.beginPath(); ctx.arc(p.x + (p.x2 - p.x) * kk, p.y + (p.y2 - p.y) * kk - Math.sin(kk * Math.PI) * 9, 3 + j, 0, 6.283); ctx.fill(); }
           ctx.globalAlpha = 1; ctx.drawImage(sp.c, x - sp.w * sc / 2, y - lift - sp.h * sc / 2, sp.w * sc, sp.h * sc);
@@ -624,6 +630,11 @@
     else {
       if (type === 'frost' && lvl === 2) { ctx.fillStyle = `rgba(140,225,255,${0.1 + 0.06 * Math.sin(now / 300)})`; ctx.beginPath(); ctx.arc(x, y, 14, 0, 6.283); ctx.fill(); }
       ctx.drawImage(sp.c, x - (sp.w * sq) / 2, y - (sp.h / sq) / 2 - 2 + (sp.h - sp.h / sq) / 2, sp.w * sq, sp.h / sq);
+    }
+    // v0.6 PLACEHOLDER (Forge Art: delete once art.js draws a Smelter; until then it reuses the Arrow sprite): glowing core
+    if (type === 'smelter' && !(AR.hasTower && AR.hasTower('smelter'))) {
+      ctx.fillStyle = `rgba(255,${110 + lvl * 30},30,0.9)`; ctx.strokeStyle = AR.OUT; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, 5 + lvl * 1.5, 0, 6.283); ctx.fill(); ctx.stroke();
     }
     ctx.globalAlpha = 1;
   }
@@ -733,6 +744,11 @@
             const sp = AR.creep(kind, cr[8], R), w = sp.w * sq * hitSq, h = sp.h / sq / hitSq;
             ctx.drawImage(sp.c, px - w / 2, py - lift - h / 2 + (sp.h - h) * 0.3, w, h);
             if (hitK) { const f = AR.creepFlash(R); ctx.globalAlpha = 0.85 * hitK; ctx.drawImage(f.c, px - f.w * hitSq / 2, py - lift - f.h / 2, f.w * hitSq, f.h); ctx.globalAlpha = 1; }
+            // v0.6 PLACEHOLDER (Forge Art: delete once art.js draws Splitters/Shards): orange crack ring / ember dot
+            if ((kind === 'splitter' || kind === 'shard') && !(AR.hasCreep && AR.hasCreep(kind))) {
+              ctx.strokeStyle = '#ff8a3a'; ctx.lineWidth = kind === 'shard' ? 1.5 : 2.5; ctx.beginPath(); ctx.arc(px, py - lift, R * 0.9, 0, 6.283); ctx.stroke();
+              if (kind === 'splitter') { ctx.beginPath(); ctx.moveTo(px - R * 0.5, py - lift - R * 0.5); ctx.lineTo(px + R * 0.5, py - lift + R * 0.5); ctx.moveTo(px + R * 0.5, py - lift - R * 0.5); ctx.lineTo(px - R * 0.5, py - lift + R * 0.5); ctx.stroke(); }
+            }
             if (cr[6]) { const ic = lowDetail ? AR.creepIceLite(R) : AR.creepIce(R); ctx.drawImage(ic.c, px - ic.w / 2, py - lift - ic.h / 2, ic.w, ic.h); }
           }
         }

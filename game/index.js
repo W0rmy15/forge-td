@@ -24,6 +24,7 @@ function stepBoard(room, team) {
   T.processSales(room, b);
   CR.moveCreeps(g, b);
   T.fireTowers(room, b);
+  W.flushBorn(b); // Splitter shards born this tick
 }
 
 function teamKills(room, team) { let k = 0; for (const p of room.players.values()) if (p.team === team) k += p.kills; return k; }
