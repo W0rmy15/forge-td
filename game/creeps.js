@@ -22,7 +22,8 @@ function moveCreeps(g, b) {
       if (dd <= step) { cr.x = tx; cr.y = ty; step -= dd; cr.c = cr.nc; cr.r = cr.nr; cr.nc = null; cr.nr = null; }
       else { cr.x += (dx / dd) * step; cr.y += (dy / dd) * step; step = 0; }
     }
-    if (leaked) {
+    if (leaked && !cr.leak) { /* a shard that carries no share of its Splitter's leak: gone, no lives, no event */ }
+    else if (leaked) {
       b.rawLives -= cr.leak;
       b.lives = Math.max(0, b.lives - cr.leak);
       b.leakFlash = 0.5;

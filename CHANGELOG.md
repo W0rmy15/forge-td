@@ -15,7 +15,7 @@ new tower and a new enemy, and the code is easier to work on. **Protocol change:
   bounty `1 + floor(n/4)` (was n/3), fast every 4th wave (was 3rd), boss every 7th wave (was 5th). Send tiers unlock at waves
   11/16/22 (was 8/12/16), the send ramp is full at wave 19 (was 14), and the 2v2 scales reach full strength at waves 19/22
   (was 14/16). All of these happen at about the same minute as before.
-- **Sudden death later and harder:** it starts at wave 39, about 14.2 min (was wave 22, about 10.8 min). Every sudden-death
+- **Sudden death later and harder:** it starts at wave 36, about 13.1 min (was wave 22, about 10.8 min). Every sudden-death
   wave is fast, gets ×1.38 HP per wave (was ×1.25), and leaks cost 2 lives (was 1). Stalled games end about 2.2 min after it starts.
 - **New tower: Smelter** (`4`, 90g). A heat beam that locks onto one creep: 6/12/22 damage every 0.25 s, ramping to ×3/×3.5/×4
   after 2 s on the same target, and reset on a switch. It is an anti-tank pick (Brutes, bosses) and weak against groups.
@@ -28,18 +28,29 @@ new tower and a new enemy, and the code is easier to work on. **Protocol change:
   commit changed no rules, and the sims were identical). From `client.js`, the audio bridge and the toast queue moved to
   `public/client/`, next to the new `layout.js`. New `ARCHITECTURE.md` maps each file to its job and owner, with a "where to
   look when X breaks" table. Placeholder drawing for the new units is marked `v0.6 PLACEHOLDER` for Forge Art.
-- **Results** (`node test/tune06.js 4`: wins for the first-listed team out of 8, both seatings):
-  - Balanced games end at 15.3–16.7 min. Every D/E20/E40 row reaches sudden death and ends within 3 min of it.
-  - There are 0 sender wins under 8 min against a pure defender.
-  - The 8 early wins in the sweep are all sender-vs-sender rows where the other side collapsed to neutral waves around 6 min.
-  - 40% senders stay viable: 1v1 E40 vs D 8/8, 2v2 E40 vs D 8/8, and runner40/brute40/swarm40/splitter40 vs D 8/8.
-  - Smelter spam is never dominant: Smelter-only loses 0/8 in 1v1 and 2v2, Smelter-heavy vs D is 0/8 (1v1) and 2/8 (2v2),
-    and Smelter-heavy E40 vs E40 is 3/8. One Smelter per five towers is a real upgrade: mix+Smelter vs mix is 8/8 at 16.4 min.
-  - The Splitter is not dominant: splitter40 vs E40 is 3/8 (1v1) and 1/8 (2v2), and 2v2 U splitter60 vs D is 3/8 (U swarm60 is 7/8).
-  - Still open: 2v2 U runner60 vs pure defense wins 8/8 at 12.7–14.9 min (v0.5.2: 2/10, ending before the old sudden death).
-    Against E20 players it is 3/8.
-- **Tests:** new `test/tune06.js` (every row in both seatings). `test/sim.js` gains wave timer, sudden death, Splitter, Smelter
-  and wire checks, and its wave numbers are now read from shared.js. The smoke test checks that the board fits 1600×1000 and
+- **QA fixes (review of 15338a1):**
+  - Killing a Splitter next to the base cost more lives than letting it leak, because every Shard carried the parent's full
+    leak. The leak is now split across the Shards (the shares add up to the parent's leak, whole lives first), and a creep
+    with leak 0 that reaches the base is removed silently. New sim test: a Splitter killed 0–1 cells before the base costs
+    exactly what a leak costs, at tiers 0 and 3, in and out of sudden death.
+  - Tower cooldowns no longer drop the leftover time of a tick (`cd += rate`, reset to 0 while there is no target). The Smelter
+    fired every 0.30 s instead of 0.25 s and Arrow L1 every 0.55 s instead of 0.5 s; every tower now fires at its listed rate (new sim test).
+  - NaN guards: `heatMult` clamps bad heat to 0, `damage()` ignores non-finite damage, the decoded shot heat stage is clamped
+    to 0–3, and the stored Smelter heat is capped at its ramp time.
+  - Balance: sudden death at wave 36 (was 39, so balanced games end around 15 min instead of 16), Runner HP 1.9× (was 2.1×).
+  - The `F` fullscreen key also ignores SELECT and TEXTAREA focus.
+- **Results** (`node test/tune06.js 4` after the QA fixes: wins for the first-listed team out of 8, both seatings):
+  - Balanced games end at 15.3–15.6 min in 1v1 and 14.5–14.9 min in 2v2. Every D/E20/E40 row reaches sudden death and ends within 3 min of it.
+  - There are 0 sender wins under 8 min against a pure defender (`matrix.js 3` and `balance.js 3`: 0 sender wins under 8 min).
+  - The only early sender win in the sweep is a sender-vs-sender row where the other side collapsed to neutral waves.
+  - 40% senders stay viable: E40 vs D 8/8 (1v1 and 2v2), U40 vs D 6/8 (1v1) and 7/8 (2v2), runner40/brute40/swarm40/splitter40 vs D 8/8.
+  - The faster towers did not make the Smelter dominant: Smelter-only loses 0/8 in 1v1 and 2v2, Smelter-heavy vs D is 0/8 (1v1)
+    and 3/8 (2v2), and Smelter-heavy E40 vs E40 is 3/8. One Smelter per five towers is an upgrade, not a must: E40+Smelter vs E40
+    is 8/8 and 2v2 D+Smelter vs D is 8/8, but 1v1 D+Smelter vs D is 1/8 (4 lost, 3 draws). All of these end at sudden death.
+  - The Splitter is not dominant: splitter40 vs E40 is 0/8 (1v1 and 2v2), and 2v2 U splitter60 vs D is 1/8.
+  - 2v2 U runner60 vs pure defense still wins 8/8, but only at 14.2–14.9 min (after sudden death starts). Against E20 players it is 2/8.
+- **Tests:** new `test/tune06.js` (every row in both seatings). `test/sim.js` gains wave timer, sudden death, Splitter, Smelter,
+  Shard leak, fire rate, NaN guard and wire checks, and its wave numbers are now read from shared.js. The smoke test checks that the board fits 1600×1000 and
   900×600 windows and that clicks still land on the right cell. The exploit test reads the send kinds from shared.js.
   The server's `debug_wave` test hook now allows waves up to 79.
 

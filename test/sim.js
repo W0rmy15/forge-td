@@ -45,7 +45,7 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
   const h1 = r1.game.boards.R.queue[0].hp, h2 = r2.game.boards.R.queue[0].hp;
   const want2 = S.sendTeamMult(2, 12);
   check('2v2 send HP = sendTeamMult(2, wave) x 1v1 send HP', Math.abs(h2 / h1 - want2) < 0.02, { h1, h2, want: want2 });
-  check('runner HP = 2.1 x wave HP x ramp at wave 12', Math.abs(h1 - 2.1 * S.waveHp(12) * S.sendRamp(12)) <= 1, { h1, wave: S.waveHp(12), ramp: S.sendRamp(12) });
+  check(`runner HP = ${S.SENDS.runner.hpMult} x wave HP x ramp at wave 12`, Math.abs(h1 - S.SENDS.runner.hpMult * S.waveHp(12) * S.sendRamp(12)) <= 1, { h1, wave: S.waveHp(12), ramp: S.sendRamp(12) });
   const rf = S.sendRampFullWave();
   check(`send ramp: wave 1 = ${S.SEND_RAMP.START + S.SEND_RAMP.PER_WAVE}x, wave ${rf}+ = 1x`, Math.abs(S.sendRamp(1) - S.SEND_RAMP.START - S.SEND_RAMP.PER_WAVE) < 1e-9 && S.sendRamp(rf - 1) < 1 && S.sendRamp(rf) === 1 && S.sendRamp(rf + 6) === 1);
   check('bounties Runner 9 / Swarm 3 / Brute 24', S.SENDS.runner.bounty === 9 && S.SENDS.swarm.bounty === 3 && S.SENDS.brute.bounty === 24);
@@ -53,7 +53,7 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
   check(`2v2 team scale eases 2.0 (wave 1) -> 2.3 (wave ${tw}+), 1v1 = 1`, S.teamScale(1, 12) === 1 && Math.abs(S.teamScale(2, 1) - 2.0) < 1e-9 && Math.abs(S.teamScale(2, tw) - 2.3) < 1e-9 && Math.abs(S.teamScale(2, tw + 16) - 2.3) < 1e-9);
   const T2 = S.SEND_TEAM2;
   check(`2v2 send multiplier: x${T2.START} to wave ${T2.FROM}, x2.99 (2.3 x 1.3) from wave ${T2.FULL}, 1v1 = 1`, S.sendTeamMult(1, 20) === 1 && S.sendTeamMult(2, 1) === T2.START && S.sendTeamMult(2, T2.FROM) === T2.START && Math.abs(S.sendTeamMult(2, T2.FULL) - 2.99) < 1e-9 && Math.abs(S.sendTeamMult(2, T2.FULL + 14) - 2.99) < 1e-9);
-  check('send HP multipliers 2.1 / 0.9 / 10.5 (QA T10)', S.SENDS.runner.hpMult === 2.1 && S.SENDS.swarm.hpMult === 0.9 && S.SENDS.brute.hpMult === 10.5);
+  check('send HP multipliers 1.9 (v0.6, was 2.1) / 0.9 / 10.5 (QA T10)', S.SENDS.runner.hpMult === 1.9 && S.SENDS.swarm.hpMult === 0.9 && S.SENDS.brute.hpMult === 10.5);
 }
 // --- unlimited sends + send lane ---
 {
@@ -223,7 +223,7 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
   for (let i = 0; i < 2000 && w2 === null; i++) { G.stepGame(room); for (const e of g.events) if (e.k === 'wave') { if (e.n === 1) w1 = g.time; if (e.n === 2) w2 = g.time; } g.events.length = 0; }
   check(`wave 1 at ${S.FIRST_WAVE}s, then every ${S.WAVE_EVERY}s`, Math.abs(w1 - S.FIRST_WAVE) < 0.06 && Math.abs(w2 - w1 - S.WAVE_EVERY) < 0.06, { w1, w2 });
   const sdMin = S.waveStartSec(S.WAVE.SUDDEN_DEATH_WAVE) / 60;
-  check(`sudden death starts at ${sdMin.toFixed(1)} min (target 14-15)`, sdMin >= 14 && sdMin <= 15);
+  check(`sudden death starts at ${sdMin.toFixed(1)} min (target ~13-15, so games end ~14-16)`, sdMin >= 12.9 && sdMin <= 15);
   const r2 = mkRoom(), g2 = r2.game; g2.wave = S.WAVE.SUDDEN_DEATH_WAVE - 1; g2.nextWave = 0.01; G.stepGame(r2);
   const q = g2.boards.L.queue.find((x) => x.kind === 'neutral');
   const wantHp = Math.round(S.waveHp(S.WAVE.SUDDEN_DEATH_WAVE) * S.WAVE.SUDDEN_DEATH_GROWTH);
@@ -281,6 +281,44 @@ const step = (room, sec) => { for (let i = 0; i < sec / G.DT && room.phase === '
   const s0 = m.ev[0], s1 = m.ev[1];
   check('wire: smelter shot keeps board, type and heat stage', s0.b === 'R' && s0.tt === 'smelter' && s0.h === 3 && s1.b === 'L' && s1.tt === 'frost' && s1.h === 0 && m.ev[2].k === 'split', m.ev);
   check('wire: splitter / shard kinds and radius decode', m.boards.L.creeps[0][1] === 'splitter' && m.boards.L.creeps[1][1] === 'shard' && m.boards.L.creeps[1][7] === S.CREEP_RADIUS.shard, m.boards.L.creeps);
+}
+// --- v0.6 QA fix: killing a Splitter next to the base never costs more lives than letting it leak (QA shardtest idea) ---
+{
+  const CR = require('../game/creeps.js'), WV = require('../game/waves.js');
+  const exitCase = (tier, sd, killAt) => {
+    const room = mkRoom(), g = room.game; g.wave = sd ? S.WAVE.SUDDEN_DEATH_WAVE : 22; const p = room.players.get(2); p.gold = 1e6; p.sendTier.splitter = tier; // R sends at L
+    G.doSend(room, p, 'splitter'); const b = g.boards.L; b.queue[0].at = 0; WV.spawnDue(g, b); const cr = b.creeps[0];
+    cr.c = S.BASE.c; cr.r = S.BASE.r - (killAt === null ? 1 : killAt); cr.x = cr.c + 0.5; cr.y = cr.r + 0.5; cr.nc = null; cr.nr = null;
+    const lives0 = b.rawLives;
+    if (killAt !== null) { G._damage(room, b, cr, 1e9, { owner: 1, type: 'arrow' }, g); b.creeps = b.creeps.filter((c) => c.hp > 0); WV.flushBorn(b); } // as fireTowers does
+    for (let i = 0; i < 400 && b.creeps.length; i++) CR.moveCreeps(g, b);
+    return lives0 - b.rawLives;
+  };
+  const rows = [];
+  for (const tier of [0, 3]) for (const sd of [false, true]) {
+    const leak = exitCase(tier, sd, null), k1 = exitCase(tier, sd, 1), k0 = exitCase(tier, sd, 0);
+    rows.push({ tier, sd, leak, killed1: k1, killed0: k0 });
+  }
+  check('Splitter killed 0-1 cells before the base costs exactly the lives of letting it leak (T0/T3, normal/SD)', rows.every((r) => r.killed1 === r.leak && r.killed0 === r.leak && r.leak >= 1), rows);
+}
+// --- v0.6 QA fix: tower fire interval equals st.rate (no dropped leftover time), NaN guards ---
+{
+  for (const [type, lvl] of [['arrow', 0], ['arrow', 2], ['smelter', 0], ['cannon', 0]]) {
+    const room = mkRoom(), g = room.game, p = room.players.get(1), b = g.boards.L; p.gold = 1e6; g.nextWave = 1e9;
+    G.build(room, p, type, 4, 3); [...b.towers.values()][0].lvl = lvl;
+    b.creeps.push({ id: 7001, kind: 'brute', hp: 1e9, maxHp: 1e9, speed: 0, bounty: 1, leak: 1, radius: 0.3, v: 0, arrowMult: 1, slowResist: 0, shards: 0, c: 5, r: 3, nc: null, nr: null, x: 5.5, y: 3.5, slowUntil: 0, slowAmt: 0, from: null });
+    let shots = 0; const secs = 30;
+    for (let i = 0; i < secs / G.DT; i++) { G.stepGame(room); shots += g.events.filter((e) => e.k === 'shot').length; g.events.length = 0; }
+    const want = secs / S.TOWERS[type].levels[lvl].rate;
+    check(`${type} L${lvl + 1} fires every ${S.TOWERS[type].levels[lvl].rate}s (${shots} shots in ${secs}s, want ~${want})`, Math.abs(shots - want) <= 1);
+  }
+  const st = S.TOWERS.smelter.levels[0];
+  check('heatMult(NaN / -1 / Infinity) stays finite', [NaN, -1, Infinity, undefined].every((h) => Number.isFinite(S.heatMult(st, h))));
+  const room = mkRoom(), g = room.game, b = g.boards.L; const cr = { id: 1, hp: 50, maxHp: 50, x: 1, y: 1, bounty: 1, kind: 'neutral', shards: 0, slowUntil: 0, arrowMult: 1 };
+  G._damage(room, b, cr, NaN, { owner: 1, type: 'smelter' }, g); G._damage(room, b, cr, Infinity, { owner: 1, type: 'smelter' }, g);
+  check('damage ignores NaN / Infinity', cr.hp === 50);
+  const m = S.decodeState({ t: 's', sh: [1e300, 1, 1, 10, 10], ev: [], boards: { L: { creeps: [] }, R: { creeps: [] } } });
+  check('decoded heat stage is clamped to 0..3', m.ev[0].h >= 0 && m.ev[0].h <= 3, m.ev[0]);
 }
 console.log(fails ? `SIM TESTS: ${fails} FAILED` : 'SIM TESTS: ALL PASS');
 process.exit(fails ? 1 : 0);

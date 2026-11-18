@@ -86,7 +86,7 @@ function sell(room, p, c, r) {
 }
 
 function damage(room, b, cr, dmg, tower, g) {
-  if (cr.hp <= 0) return;
+  if (cr.hp <= 0 || !Number.isFinite(dmg) || dmg <= 0) return; // never let NaN/Infinity reach a creep's HP
   if (g.time < cr.slowUntil) dmg *= S.SLOWED_DMG_MULT;
   if (tower.type === 'arrow' && cr.arrowMult !== 1) dmg *= cr.arrowMult; // armored Brutes
   cr.hp -= dmg;
@@ -127,7 +127,7 @@ function fireTowers(room, b) {
   // towers fire
   for (const t of b.towers.values()) {
     t.cd -= DT; // towers queued for sale keep firing until the sale executes
-    if (t.cd > 0) continue;
+    if (t.cd > 1e-9) continue; // epsilon: 0.25 - 5 x 0.05 is not exactly 0 in floating point
     const st = S.TOWERS[t.type].levels[t.lvl];
     const tx = t.c + 0.5, ty = t.r + 0.5;
     let target = null, best = Infinity;
@@ -143,8 +143,8 @@ function fireTowers(room, b) {
       const score = (prog < 0 ? 999 : prog) - (cr.hp / cr.maxHp) * 0.01;
       if (score < best) { best = score; target = cr; }
     }
-    if (!target) { if (t.type === 'smelter') { t.lock = null; t.heat = 0; } continue; }
-    t.cd = st.rate;
+    if (!target) { t.cd = 0; if (t.type === 'smelter') { t.lock = null; t.heat = 0; } continue; } // idle: ready, but no banked shots
+    t.cd += st.rate; // keep the leftover time so the real fire interval equals st.rate
     const shot = { k: 'shot', b: team, tt: t.type, x1: +tx.toFixed(2), y1: +ty.toFixed(2), x2: +target.x.toFixed(2), y2: +target.y.toFixed(2) };
     g.events.push(shot);
     if (t.type === 'smelter') {
@@ -152,7 +152,7 @@ function fireTowers(room, b) {
       const mult = S.heatMult(st, t.heat);
       shot.h = Math.min(3, Math.floor((mult - 1) / (st.heatMax - 1) * 3 + 1e-9)); // heat stage 0..3 for the beam visual
       damage(room, b, target, st.dmg * mult, t, g);
-      t.heat += st.rate;
+      t.heat = Math.min(st.heatTime, (t.heat || 0) + st.rate); // capped: only the first heatTime seconds matter
     } else if (t.type === 'cannon') {
       for (const cr of b.creeps) if (cr.hp > 0 && Math.hypot(cr.x - target.x, cr.y - target.y) <= st.splash) damage(room, b, cr, st.dmg, t, g);
       g.events.push({ k: 'boom', b: team, x: +target.x.toFixed(2), y: +target.y.toFixed(2), r: st.splash });

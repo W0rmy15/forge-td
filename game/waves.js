@@ -27,9 +27,12 @@ function splitShards(g, b, parent) {
   if (n <= 0) return;
   const hp = Math.max(1, Math.round(parent.maxHp * SP.SHARD_HP)), bounty = Math.max(1, Math.round(parent.bounty * SP.SHARD_BOUNTY));
   const spec = { kind: 'shard', speed: SP.SHARD_SPEED, bounty, radius: SP.SHARD_RADIUS, v: parent.v, from: parent.from };
+  // the parent's leak is split across its shards (total = parent.leak), so killing a Splitter next to the base never
+  // costs more lives than letting it leak: whole lives go to the first shards, any fractional rest to shard 0
+  const L = parent.leak || 0, per = Math.floor(L / n), whole = Math.floor(L - per * n), frac = L - per * n - whole;
   for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2, o = 0.12;
-    const cr = makeCreep(g, spec, hp, parent.leak, parent.c, parent.r, parent.x + Math.cos(a) * o, parent.y + Math.sin(a) * o);
+    const a = (i / n) * Math.PI * 2, o = 0.12, leak = per + (i < whole ? 1 : 0) + (i === 0 ? frac : 0);
+    const cr = makeCreep(g, spec, hp, leak, parent.c, parent.r, parent.x + Math.cos(a) * o, parent.y + Math.sin(a) * o);
     cr.nc = parent.nc; cr.nr = parent.nr;
     (b.born || (b.born = [])).push(cr);
   }

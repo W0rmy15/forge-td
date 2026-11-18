@@ -32,7 +32,7 @@
       // sudden death: from this wave on, every wave gets an extra HP multiplier (compounding per wave), leaks cost
       // SUDDEN_DEATH_LEAK_MULT lives each, and (SUDDEN_DEATH_FAST) every sudden-death wave runs at FAST_SPEED.
       // When a base falls in sudden death the current wave is finished and the side that lost fewer lives in total wins.
-      SUDDEN_DEATH_WAVE: 39, SUDDEN_DEATH_GROWTH: 1.38, SUDDEN_DEATH_LEAK_MULT: 2, SUDDEN_DEATH_FAST: true,
+      SUDDEN_DEATH_WAVE: 36, SUDDEN_DEATH_GROWTH: 1.38, SUDDEN_DEATH_LEAK_MULT: 2, SUDDEN_DEATH_FAST: true,
     },
     // neutral waves scale with team size: 2v2 = x2.3 HP (a team of two has 2x the gold plus shared-maze synergy)
     // (eased in: TEAM2_SCALE_START at wave 1 rising linearly to TEAM2_SCALE at TEAM2_SCALE_WAVE, so 2v2 isn't harsher than 1v1 early)
@@ -79,7 +79,7 @@
     SEND_LANE_MULT: 1.5,
     SEND_RAMP: { START: 0.2, PER_WAVE: 0.044 }, // v0.6: full strength at wave 19 (~6.9 min, as before) // send HP multiplier = min(1, START + PER_WAVE * wave)
     SENDS: {
-      runner: { name: 'Runner', key: 'q', desc: 'Fast', cost: 35, income: 2, hpMult: 2.1, speed: 2.6, bounty: 9, leak: 1, count: 1, gap: 0, lane: 0.6, radius: 0.22, color: '#7bed6f' },
+      runner: { name: 'Runner', key: 'q', desc: 'Fast', cost: 35, income: 2, hpMult: 1.9, speed: 2.6, bounty: 9, leak: 1, count: 1, gap: 0, lane: 0.6, radius: 0.22, color: '#7bed6f' },
       brute: { name: 'Brute', key: 'w', desc: 'Very tanky', cost: 70, income: 4, hpMult: 10.5, speed: 0.95, bounty: 24, leak: 1, count: 1, gap: 0, lane: 2, radius: 0.36, color: '#e05d5d' },
       swarm: { name: 'Swarm', key: 'e', desc: '5 small', cost: 50, income: 3, hpMult: 0.9, speed: 1.8, bounty: 3, leak: 1, count: 5, gap: 0.25, lane: 1.5, radius: 0.16, color: '#c58bff' },
       // v0.6 Slag Splitter: medium body that bursts into fast Shards when killed (SPLIT). Punishes single-target and
@@ -155,7 +155,7 @@
   // v0.6 helpers: is wave n a boss / splitter wave; Smelter damage multiplier after `heat` seconds on one target
   S.isBossWave = function (n) { return n > 0 && n % S.WAVE.BOSS_EVERY === 0; };
   S.isSplitWave = function (n) { const W = S.WAVE; return n >= W.SPLIT_FROM && n % W.SPLIT_EVERY === W.SPLIT_AT && !S.isBossWave(n); };
-  S.heatMult = function (st, heat) { return 1 + (st.heatMax - 1) * Math.min(1, Math.max(0, heat) / st.heatTime); };
+  S.heatMult = function (st, heat) { return 1 + (st.heatMax - 1) * Math.min(1, (Math.max(0, heat) || 0) / st.heatTime); };
   // seconds from game start at which wave n starts
   S.waveStartSec = function (n) { return S.FIRST_WAVE + (n - 1) * S.WAVE_EVERY; };
   S.creepRadius = function (kind) { return S.hasSend(kind) ? S.SENDS[kind].radius : (S.CREEP_RADIUS[kind] || 0.24); };
@@ -174,7 +174,7 @@
     for (let i = 0; i + 4 < sh.length; i += 5) {
       const code = sh[i], c = sh[i + 1], r = sh[i + 2];
       const NT = T.length, lo = code % (2 * NT);
-      shots.push({ k: 'shot', b: lo >= NT ? 'R' : 'L', tt: T[lo % NT], x1: c + 0.5, y1: r + 0.5, x2: sh[i + 3] / 10, y2: sh[i + 4] / 10, h: Math.floor(code / (2 * NT)) });
+      shots.push({ k: 'shot', b: lo >= NT ? 'R' : 'L', tt: T[lo % NT], x1: c + 0.5, y1: r + 0.5, x2: sh[i + 3] / 10, y2: sh[i + 4] / 10, h: Math.min(3, Math.floor(code / (2 * NT))) || 0 });
     }
     m.ev = shots.concat(m.ev || []); delete m.sh; m.dec = 1;
     return m;

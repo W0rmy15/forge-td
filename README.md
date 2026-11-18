@@ -50,9 +50,9 @@ The quick-tunnel URL changes each time cloudflared restarts.
    sides; a wave has `min(4 + floor(0.7 × wave), 16)` creeps, wave HP grows ×1.118 per wave (2v2: ×2.0 at wave 1 easing up
    to ×2.3 by wave 19), every 4th wave is fast, and every 7th wave has a boss (×9 HP, costs 3 lives). From wave 8 some waves
    (8, 13, 18, 23, 33, 38 …) end with **Slag Splitters** that burst into Shards when killed.
-7. **Sudden death** starts at wave 39 (about 14 minutes in; a red banner shows it): every wave is fast, gets an extra
+7. **Sudden death** starts at wave 36 (about 13 minutes in; a red banner shows it): every wave is fast, gets an extra
    ×1.38 HP on top of the last, and every leak costs **2** lives, so stalled matches end within about 2–3 minutes
-   (balanced games end around 15–17 minutes). If a base falls during sudden death the
+   (balanced games end around 14.5–15.5 minutes). If a base falls during sudden death the
    game doesn't stop at once: the current wave is played out (no new sends), then the team that lost fewer lives
    in total (overkill counts) wins, then the team with more kills; a draw only if both are identical.
    Before sudden death a fallen base loses immediately (same-tick falls use the same tiebreak).
@@ -90,7 +90,7 @@ than new towers (new towers also lengthen your maze).
 
 | Send | HP (× wave creep) | Defender's bounty | Lane time |
 |---|---|---|---|
-| Runner (Q) — 35g, +2 income, fast | 2.1× | 9g | 0.9 s |
+| Runner (Q) — 35g, +2 income, fast | 1.9× | 9g | 0.9 s |
 | Brute (W) — 70g, +4 income, slow, very tanky | 10.5× | 24g | 3 s |
 | Swarm (E) — 50g, +3 income, five small creeps | 0.9× each | 3g each | 2.25 s |
 | Splitter (R) — 60g, +3.4 income, bursts into 3 fast Shards when killed (v0.6) | 2.8×, each Shard 22% of that | 10g, Shards 2g each | 2.25 s |
