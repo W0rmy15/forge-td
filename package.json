@@ -1,6 +1,6 @@
 {
   "name": "forge-td",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Online multiplayer versus tower defense (1v1 / 2v2) in the browser",
   "main": "server.js",
   "scripts": {
@@ -9,6 +9,7 @@
     "test:balance": "node test/balance.js 5",
     "test:matrix": "node test/matrix.js 5",
     "test:sim": "node test/sim.js && node test/juggle.js",
+    "test:tune": "node test/tune06.js 3",
     "test:lifecycle": "node test/lifecycle.js ws://localhost:8723"
   },
   "license": "MIT",

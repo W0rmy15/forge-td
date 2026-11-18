@@ -1,4 +1,4 @@
-# Forge TD v0.5.2 — online versus tower defense (1v1 / 2v2)
+# Forge TD v0.6.0 — online versus tower defense (1v1 / 2v2)
 
 A top-down, browser-based **versus tower defense** game. Two teams (Left vs Right), 1–2 players each.
 Teammates share one maze and defend together; you spend gold to **send creeps** at the other team,
@@ -46,10 +46,13 @@ The quick-tunnel URL changes each time cloudflared restarts.
    (with diminishing returns). There is **no per-wave limit**: gold is the only limit. Sends enter the enemy
    board through one lane, so a big dump arrives as a steady stream rather than all at once.
    You can also **upgrade your sends** (tiers 1–3, see below): upgrades last the whole match and both teams can see them.
-6. Every **10 s** every player gets their income. Every **30 s** (first at 20 s) a neutral wave hits both
-   sides; wave HP grows ×1.17 per wave (2v2: ×2.0 at wave 1 easing up to ×2.3 by wave 14), and every 5th wave has a boss (×9 HP, costs 3 lives).
-7. **Sudden death** starts at wave 22 (about 11 minutes in; a red banner shows it): every wave gets an extra
-   ×1.25 HP on top of the last, so matches end in roughly 12–15 minutes. If a base falls during sudden death the
+6. Every **10 s** every player gets their income. Every **22 s** (first at 15 s) a neutral wave hits both
+   sides; a wave has `min(4 + floor(0.7 × wave), 16)` creeps, wave HP grows ×1.118 per wave (2v2: ×2.0 at wave 1 easing up
+   to ×2.3 by wave 19), every 4th wave is fast, and every 7th wave has a boss (×9 HP, costs 3 lives). From wave 8 some waves
+   (8, 13, 18, 23, 33, 38 …) end with **Slag Splitters** that burst into Shards when killed.
+7. **Sudden death** starts at wave 39 (about 14 minutes in; a red banner shows it): every wave is fast, gets an extra
+   ×1.38 HP on top of the last, and every leak costs **2** lives, so stalled matches end within about 2–3 minutes
+   (balanced games end around 15–17 minutes). If a base falls during sudden death the
    game doesn't stop at once: the current wave is played out (no new sends), then the team that lost fewer lives
    in total (overkill counts) wins, then the team with more kills; a draw only if both are identical.
    Before sudden death a fallen base loses immediately (same-tick falls use the same tiebreak).
@@ -60,22 +63,25 @@ The quick-tunnel URL changes each time cloudflared restarts.
 
 | Action | Input |
 |---|---|
-| Select tower type to build | `1` Arrow · `2` Cannon · `3` Frost (or click the buttons) |
+| Select tower type to build | `1` Arrow · `2` Cannon · `3` Frost · `4` Smelter (or click the buttons) |
 | Build | Left-click an empty cell on your side (ghost turns red if invalid) |
 | Select a tower | Left-click it (shows range + stats) |
 | Upgrade / Sell selected tower | `U` / `X` twice (or the buttons; the first press asks to confirm) — sell refunds 70%. While creeps are on your board (or a spawn is due within 2 s) the sale is **queued**: the tower keeps firing, shows a 💲, and is sold the moment your board is clear, or after 10 s if removing it changes no creep's route, or after 20 s no matter what (so a trickle of sends can't lock your towers in place). Press `X` on it again to cancel. Holding a key down does not auto-repeat sends, upgrades or sells. |
-| Send creeps | `Q` Runner · `W` Brute · `E` Swarm |
-| Upgrade a send type (next tier) | `Shift+Q` / `Shift+W` / `Shift+E`, or the ⬆ button under each send |
+| Send creeps | `Q` Runner · `W` Brute · `E` Swarm · `R` Splitter |
+| Upgrade a send type (next tier) | `Shift+Q` / `W` / `E` / `R`, or the ⬆ button under each send |
+| Fullscreen | `F` (the board always scales to fill the window) |
 | Cancel | `Esc` or right-click |
 | Chat | `Enter` |
 
 ### Towers (3 levels each)
+
 
 | Tower | Cost | Role |
 |---|---|---|
 | Arrow | 50 | Fast, single target |
 | Cannon | 80 | Slow, splash damage |
 | Frost | 60 | Low damage, slows every creep in a small area; slowed creeps take **+25% damage** from all towers |
+| Smelter (v0.6) | 90 | Heat beam that locks onto one creep: 6 / 12 / 22 damage every 0.25 s, ramping to ×3 / ×3.5 / ×4 after 2 s on the same target, reset when it switches. Melts Brutes and bosses, weak against Swarms and Splitter shards. Range 2.5 / 2.7 / 2.9 |
 
 Upgrade to level 2 costs 1× the base price, to level 3 costs 1.6×. Upgrades give only slightly more damage per gold
 than new towers (new towers also lengthen your maze).
@@ -87,12 +93,13 @@ than new towers (new towers also lengthen your maze).
 | Runner (Q) — 35g, +2 income, fast | 2.1× | 9g | 0.9 s |
 | Brute (W) — 70g, +4 income, slow, very tanky | 10.5× | 24g | 3 s |
 | Swarm (E) — 50g, +3 income, five small creeps | 0.9× each | 3g each | 2.25 s |
+| Splitter (R) — 60g, +3.4 income, bursts into 3 fast Shards when killed (v0.6) | 2.8×, each Shard 22% of that | 10g, Shards 2g each | 2.25 s |
 
-Sent creeps follow the neutral wave HP curve. In 2v2 they get ×1.5 HP up to wave 6, rising linearly to
-×2.99 (= 2.3 team scale × 1.3 two-attacker bonus) at wave 16. On top of that an early-game ramp (×0.26 at wave 1 rising
-to ×1 at wave 14) means a rush can't flatten a defense before it exists.
+Sent creeps follow the neutral wave HP curve. In 2v2 they get ×1.5 HP up to wave 8, rising linearly to
+×2.99 (= 2.3 team scale × 1.3 two-attacker bonus) at wave 22. On top of that an early-game ramp (×0.244 at wave 1 rising
+to ×1 at wave 19) means a rush can't flatten a defense before it exists.
 In 2v2 a send's defender bounty is multiplied by the same 2v2 multiplier as its HP (defenders earn the same gold per HP as
-in 1v1), and the income a send (or a send-tier purchase) gives its sender is ×0.70 (`SEND_TEAM2_INCOME`, `SEND_TEAM2_BOUNTY`,
+in 1v1), and the income a send (or a send-tier purchase) gives its sender is ×0.60 (`SEND_TEAM2_INCOME`, `SEND_TEAM2_BOUNTY`,
 `SEND_TEAM2_UPINCOME` in shared.js).
 The income you gain per send shrinks as your send income grows (`income × 120 / (120 + income already gained from sends)`).
 Sends are unlimited (there is no per-wave cap), but each enemy board has a single send lane: every send occupies it for
@@ -105,16 +112,16 @@ The panel shows how many sent creeps are queued on each side, and enemy sends sh
 
 ### Send upgrades (v0.4)
 
-Each player can upgrade each send type up to **tier 3** with gold (`Shift+Q/W/E` or the ⬆ buttons). Tiers last for the
-whole match and apply to every later send of that type. Tier 1 unlocks at **wave 8**, tier 2 at **wave 12** and tier 3 at
-**wave 16**. Your tiers show as badges in the player list, and the **Enemy send tiers** panel shows the other team's.
+Each player can upgrade each send type up to **tier 3** with gold (`Shift+Q/W/E/R` or the ⬆ buttons). Tiers last for the
+whole match and apply to every later send of that type. Tier 1 unlocks at **wave 11**, tier 2 at **wave 16** and tier 3 at
+**wave 22** (about 3.9, 5.7 and 7.9 minutes in). Your tiers show as badges in the player list, and the **Enemy send tiers** panel shows the other team's.
 Higher tiers look different: a bronze, silver or gold ring, and extra gear (helmets, spikes, crowns).
 
 | Tier | Unlocks | Upgrade price | HP | Send price / income | Defender's bounty | Extra trait |
 |---|---|---|---|---|---|---|
-| 1 | wave 8 | Runner 61 · Brute 123 · Swarm 88 | ×1.2 | ×1.1 | ×1.2 | — |
-| 2 | wave 12 | Runner 105 · Brute 210 · Swarm 150 | ×1.5 | ×1.2 | ×1.5 | Runner +20% speed · Brute armor (−40% Arrow damage) · Swarm 6 per send |
-| 3 | wave 16 | Runner 175 · Brute 350 · Swarm 250 | ×1.85 | ×1.3 | ×1.85 | Runner +35% speed · Brute −50% Arrow damage and half slow · Swarm still 6 per send |
+| 1 | wave 11 | Runner 61 · Brute 123 · Swarm 88 · Splitter 105 | ×1.2 | ×1.1 | ×1.2 | — |
+| 2 | wave 16 | Runner 105 · Brute 210 · Swarm 150 · Splitter 180 | ×1.5 | ×1.2 | ×1.5 | Runner +20% speed · Brute armor (−40% Arrow damage) · Swarm 6 per send |
+| 3 | wave 22 | Runner 175 · Brute 350 · Swarm 250 · Splitter 300 | ×1.85 | ×1.3 | ×1.85 | Runner +35% speed · Brute −50% Arrow damage and half slow · Swarm still 6 per send · Splitter 4 Shards |
 
 Buying a tier also adds a little income (3% of its price, with the same falloff as sends). The bounty grows with the HP,
 so defenders earn the same gold per HP killed. All numbers live in `public/shared.js` (`SEND_UP`, `SEND_TRAITS`) for easy tuning.
@@ -148,6 +155,7 @@ If a game tick ever throws, the error is logged once and that room is reset to t
 ## Tests
 
 ```bash
+node test/tune06.js [seeds] [filter]          # v0.6 sweep (22 s waves, sudden death, Smelter, Splitter); both seatings per row
 npm run test:balance                          # in-process balance sim incl. send-tier upgrader bots, 5 seeds each, ~30 s
 # with a server running on port 8080:
 npm run test:sim                              # in-process rule checks: queued sales (max wait, route check, hard cap, trickle), send scaling/lane limit, send tiers, sudden death
@@ -167,7 +175,7 @@ npm run test:lifecycle
 PORT=8732 TRUST_PROXY=1 node server.js &  node test/v03.js ws://localhost:8732 trustproxy
 PORT=8733 TRUST_CF=1 node server.js &     node test/v03.js ws://localhost:8733 trustcf
 # headless-browser smoke test (needs puppeteer-core + Chrome; run first on a fresh server). With FORGE_TEST_HOOKS=1 it
-# also buys a real send tier (jumps to wave 8 via a test hook); without hooks that part is skipped:
+# also buys a real send tier (jumps to the tier-1 unlock wave via a test hook) and checks the board fits 1600x1000 / 900x600 windows; without hooks that part is skipped:
 PORT=8742 FORGE_TEST_HOOKS=1 node server.js &  node test/smoke.js http://localhost:8742
 # screenshots of the menu, lobby and a busy 2v2 at wave 17 with tiered sends + render-time stats:
 PORT=8741 SPEED=12 FORGE_TEST_HOOKS=1 node server.js &  node test/shots.js http://localhost:8741 ./shots
@@ -180,15 +188,19 @@ For faster simulated games run the server with `SPEED=20 PORT=8090 node server.j
 
 ```
 server.js          HTTP static server + WebSocket server (rooms, lobby, limits, snapshots)
-game.js            Pure game simulation (waves, towers, sends, win/tiebreak), used by server.js and test/balance.js
+game.js            Entry point for the game simulation (re-exports game/index.js)
+game/              Pure game simulation split by rule: core, waves (+ sudden death, Splitters), sends, towers, creeps, index (tick loop)
 wire.js            Compact state encoding (creeps, shots, lane info); decoded by SHARED.decodeState in public/shared.js
 public/shared.js   All tuning constants (economy, towers, sends, waves, sudden death) + BFS pathfinding, shared by server & client
-public/client.js   Lobby UI, canvas renderer (cached board layer, particle pool), input
+public/client.js   Lobby UI, HUD, canvas renderer (cached board layer, particle pool), input
+public/client/     Client modules: layout.js (screen fit + fullscreen), toast.js, audio-bridge.js
+public/audio.js    Procedural Web Audio (Forge Sound)
 public/art.js      Procedural cartoon sprites (towers, creeps, board, icons), cached per size
 public/fonts/      Fredoka (SIL OFL 1.1, see OFL.txt)
 public/index.html, public/style.css
 test/              Headless tests: bots, maze, exploits, lifecycle, balance sim, smoke + screenshots (test/lib.js = client helper)
 CHANGELOG.md       Version history
+ARCHITECTURE.md    Which file owns which job, who owns which file, and where to look when something breaks
 ```
 
 ## Known limitations (prototype)
@@ -197,4 +209,4 @@ CHANGELOG.md       Version history
 - Refreshing the page rejoins your slot (a token is kept in localStorage); new players cannot join a game in progress.
 - Opening your seat in a second tab moves it there; the first tab returns to the menu with a message and doesn't reconnect.
   Any failed join (room gone, game in progress, room full) returns to the menu with the reason.
-- No sound, no spectators, no matchmaking. Balance was tuned with scripted bots, not human playtests.
+- No spectators, no matchmaking. Balance was tuned with scripted bots, not human playtests.

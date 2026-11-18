@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.6.0 — 2026-11-17
+
+The user's v0.6 requests: the game fills the screen, waves come faster, sudden death comes later and hits harder, there is a
+new tower and a new enemy, and the code is easier to work on. **Protocol change:** new creep kinds and a new tower type
+(appended to `S.WIRE`), and the shot code now carries the tower count and a heat stage (see `wire.js`). Clients and server must match (one deploy).
+
+- **Screen fit:** the board scales to fill the window next to the panel (aspect kept, minimal letterbox), with resize,
+  fullscreen, zoom/DPR and panel/banner size changes handled (`public/client/layout.js`). The canvas renders at
+  devicePixelRatio × scale (capped at 3), so it stays sharp. Clicks are mapped through the scale and the canvas border
+  (the old mapping was off by the 4 px border). Press `F` (or any `#fsBtn`) for fullscreen.
+- **Waves every 22 s** (was 30; first wave at 15 s, was 20). Per-wave numbers were re-based so the pressure per minute stays
+  close to v0.5: creeps per wave `min(4 + floor(0.7n), 16)` (was `min(6 + n, 22)`), HP growth ×1.118 per wave (was 1.17),
+  bounty `1 + floor(n/4)` (was n/3), fast every 4th wave (was 3rd), boss every 7th wave (was 5th). Send tiers unlock at waves
+  11/16/22 (was 8/12/16), the send ramp is full at wave 19 (was 14), and the 2v2 scales reach full strength at waves 19/22
+  (was 14/16). All of these happen at about the same minute as before.
+- **Sudden death later and harder:** it starts at wave 39, about 14.2 min (was wave 22, about 10.8 min). Every sudden-death
+  wave is fast, gets ×1.38 HP per wave (was ×1.25), and leaks cost 2 lives (was 1). Stalled games end about 2.2 min after it starts.
+- **New tower: Smelter** (`4`, 90g). A heat beam that locks onto one creep: 6/12/22 damage every 0.25 s, ramping to ×3/×3.5/×4
+  after 2 s on the same target, and reset on a switch. It is an anti-tank pick (Brutes, bosses) and weak against groups.
+- **New enemy: Slag Splitter** (`R`, 60g, +3.4 income, 2.8× HP). It bursts into 3 fast Shards (22% HP each, 4 at tier 3) when
+  killed. It is a splash check that punishes single-target and ramping towers. Neutral waves 8, 13, 18, 23, 33 and 38 end with Splitters.
+  New event `{k:'split', b, x, y, n, v}`.
+- **2v2 send income ×0.60** (was 0.70). With the later sudden death, heavy 2v2 upgrading senders had more time to snowball
+  (U swarm60 and U splitter60 beat pure defense 6/6). 1v1 is unaffected.
+- **Code organization:** `game.js` is now an entry point over `game/` (core, waves, sends, towers, creeps, index; that split
+  commit changed no rules, and the sims were identical). From `client.js`, the audio bridge and the toast queue moved to
+  `public/client/`, next to the new `layout.js`. New `ARCHITECTURE.md` maps each file to its job and owner, with a "where to
+  look when X breaks" table. Placeholder drawing for the new units is marked `v0.6 PLACEHOLDER` for Forge Art.
+- **Results** (`node test/tune06.js 4`: wins for the first-listed team out of 8, both seatings):
+  - Balanced games end at 15.3–16.7 min. Every D/E20/E40 row reaches sudden death and ends within 3 min of it.
+  - There are 0 sender wins under 8 min against a pure defender.
+  - The 8 early wins in the sweep are all sender-vs-sender rows where the other side collapsed to neutral waves around 6 min.
+  - 40% senders stay viable: 1v1 E40 vs D 8/8, 2v2 E40 vs D 8/8, and runner40/brute40/swarm40/splitter40 vs D 8/8.
+  - Smelter spam is never dominant: Smelter-only loses 0/8 in 1v1 and 2v2, Smelter-heavy vs D is 0/8 (1v1) and 2/8 (2v2),
+    and Smelter-heavy E40 vs E40 is 3/8. One Smelter per five towers is a real upgrade: mix+Smelter vs mix is 8/8 at 16.4 min.
+  - The Splitter is not dominant: splitter40 vs E40 is 3/8 (1v1) and 1/8 (2v2), and 2v2 U splitter60 vs D is 3/8 (U swarm60 is 7/8).
+  - Still open: 2v2 U runner60 vs pure defense wins 8/8 at 12.7–14.9 min (v0.5.2: 2/10, ending before the old sudden death).
+    Against E20 players it is 3/8.
+- **Tests:** new `test/tune06.js` (every row in both seatings). `test/sim.js` gains wave timer, sudden death, Splitter, Smelter
+  and wire checks, and its wave numbers are now read from shared.js. The smoke test checks that the board fits 1600×1000 and
+  900×600 windows and that clicks still land on the right cell. The exploit test reads the send kinds from shared.js.
+  The server's `debug_wave` test hook now allows waves up to 79.
+
 ## 0.5.2 — 2026-11-17
 
 2v2 economy follow-up from the v0.5.1 QA review. No protocol changes. The client also ships the Forge Sound and Forge Art follow-ups listed below.
