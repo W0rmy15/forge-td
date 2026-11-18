@@ -179,10 +179,10 @@
       var now = ts;
       if (!lagging && (emaMs > emaEnter || longStreak >= 3)) {
         lagging = true; goodStreak = 0; lagUntil = now + 500;
-        musicApplyCheap();
+        musicApplyCheap(); smelterApplyCheap();
       } else if (lagging && now > lagUntil && goodStreak >= 24 && emaMs < emaExit) {
         lagging = false;
-        musicApplyCheap();
+        musicApplyCheap(); smelterApplyCheap();
       }
     };
     raf(loop);
@@ -554,10 +554,10 @@
   }
 
   function killClank(v, dest, t0, p, vol, kind) {
-    var heavy = kind === 'boss' || kind === 'brute';
+    var heavy = kind === 'boss' || kind === 'brute' || kind === 'splitter';
     var tiny = kind === 'swarm';
-    var base = (tiny ? 980 : kind === 'runner' ? 720 : kind === 'boss' ? 140 : kind === 'brute' ? 210 : 420) * p;
-    var dur = tiny ? 0.14 : heavy ? (kind === 'boss' ? 0.7 : 0.42) : 0.28;
+    var base = (tiny ? 980 : kind === 'runner' ? 720 : kind === 'boss' ? 140 : kind === 'brute' ? 210 : kind === 'splitter' ? 195 : 420) * p;
+    var dur = tiny ? 0.14 : heavy ? (kind === 'boss' ? 0.7 : kind === 'splitter' ? 0.4 : 0.42) : 0.28;
     var g = (tiny ? 0.28 : heavy ? 0.55 : 0.38) * vol;
     var parts = cheapMode ? (heavy ? 4 : 3) : (tiny ? 4 : heavy ? 8 : 6);
     anvil(v, dest, t0, base, dur, g, { partials: parts, noise: cheapMode ? 0 : (heavy ? 0.4 : 0.25), noThud: tiny || cheapMode });
@@ -566,8 +566,43 @@
     if (kind === 'boss') {
       boomBody(v, dest, t0, 70 * p, 0.45, 0.45 * vol);
       sizzle(v, dest, t0 + 0.05, 0.5, 0.22 * vol, 3200);
+    } else if (kind === 'splitter') {
+      crackle(v, dest, t0 + 0.02, 0.22, g * 0.4, 18);
+      sizzle(v, dest, t0 + 0.03, 0.3, g * 0.26, 3400);
     }
     return dur + 0.06;
+  }
+
+  function killShard(v, dest, t0, p, vol) {
+    var g = envGain(dest, t0, 0.15 * vol, 0.001, 0.05);
+    var o = startOsc(v, 'sine', 2200 * p, g, t0, 0.06);
+    o.frequency.exponentialRampToValueAtTime(Math.max(20, 1400 * p), t0 + 0.05);
+    if (!cheapMode) {
+      var g2 = envGain(dest, t0, 0.07 * vol, 0.001, 0.04);
+      startOsc(v, 'triangle', 3300 * p, g2, t0, 0.05);
+    }
+    return 0.07;
+  }
+
+  function splitBurst(v, dest, t0, p, vol, opts) {
+    var n = 3;
+    if (opts && isFinite(+opts.n)) n = Math.max(1, Math.min(4, Math.round(+opts.n)));
+    if (cheapMode) n = Math.min(n, 2);
+    anvil(v, dest, t0, 240 * p, 0.32, 0.5 * vol, { partials: cheapMode ? 3 : 6, noise: 0.35 });
+    crackle(v, dest, t0, 0.22, 0.32 * vol, 18);
+    sizzle(v, dest, t0 + 0.04, 0.3, 0.2 * vol, 4200);
+    for (var i = 0; i < n; i++) {
+      var t = t0 + 0.025 + i * 0.035 + Math.random() * 0.015;
+      var f = (1650 + i * 280 + Math.random() * 180) * p;
+      var tg = envGain(dest, t, 0.16 * vol, 0.002, 0.07);
+      var to = startOsc(v, 'sine', f, tg, t, 0.08);
+      to.frequency.exponentialRampToValueAtTime(Math.max(20, f * 0.7), t + 0.06);
+      if (!cheapMode) {
+        var tg2 = envGain(dest, t, 0.07 * vol, 0.002, 0.05);
+        startOsc(v, 'triangle', f * 1.68, tg2, t, 0.06);
+      }
+    }
+    return 0.42 + n * 0.02;
   }
 
   function leakSting(v, dest, t0, p, vol) {
@@ -592,15 +627,17 @@
   }
 
   function bellows(v, dest, t0, p, vol, kind) {
-    var dur = kind === 'brute' ? 0.5 : kind === 'swarm' ? 0.36 : 0.4;
-    var from = (kind === 'brute' ? 160 : kind === 'runner' ? 380 : 240) * p;
-    var to = (kind === 'brute' ? 700 : kind === 'runner' ? 2100 : kind === 'swarm' ? 1800 : 1300) * p;
+    var dur = kind === 'brute' ? 0.5 : kind === 'splitter' ? 0.46 : kind === 'swarm' ? 0.36 : 0.4;
+    var from = (kind === 'brute' ? 160 : kind === 'splitter' ? 200 : kind === 'runner' ? 380 : 240) * p;
+    var to = (kind === 'brute' ? 700 : kind === 'splitter' ? 1050 : kind === 'runner' ? 2100 : kind === 'swarm' ? 1800 : 1300) * p;
     whoosh(v, dest, t0, dur, 0.42 * vol, from, to, 'pink');
     // leather pump thump
-    boomBody(v, dest, t0, (kind === 'brute' ? 70 : 100) * p, 0.12, 0.22 * vol);
+    boomBody(v, dest, t0, (kind === 'brute' ? 70 : kind === 'splitter' ? 85 : 100) * p, 0.12, 0.22 * vol);
     if (kind === 'swarm') {
       whoosh(v, dest, t0 + 0.07, 0.22, 0.22 * vol, 500 * p, 2000 * p, 'pink');
       whoosh(v, dest, t0 + 0.14, 0.2, 0.16 * vol, 600 * p, 1700 * p, 'white');
+    } else if (kind === 'splitter') {
+      anvil(v, dest, t0 + 0.06, 340 * p, 0.18, 0.2 * vol, { partials: cheapMode ? 2 : 4, noise: 0.22, noThud: true });
     }
     return dur + 0.04;
   }
@@ -739,13 +776,18 @@
     kill_runner: function (v, d, t, p, vol) { return killClank(v, d, t, p, vol, 'runner'); },
     kill_swarm: function (v, d, t, p, vol) { return killClank(v, d, t, p, vol, 'swarm'); },
     kill_brute: function (v, d, t, p, vol) { return killClank(v, d, t, p, vol, 'brute'); },
+    kill_splitter: function (v, d, t, p, vol) { return killClank(v, d, t, p, vol, 'splitter'); },
+    kill_shard: killShard,
     kill_boss: function (v, d, t, p, vol) { return killClank(v, d, t, p, vol, 'boss'); },
+    split: splitBurst,
+    shot_smelter: function () { return 0; },
     leak: leakSting,
     life_loss: lifeLoss,
     send: function (v, d, t, p, vol) { return bellows(v, d, t, p, vol, 'runner'); },
     send_runner: function (v, d, t, p, vol) { return bellows(v, d, t, p, vol, 'runner'); },
     send_brute: function (v, d, t, p, vol) { return bellows(v, d, t, p, vol, 'brute'); },
     send_swarm: function (v, d, t, p, vol) { return bellows(v, d, t, p, vol, 'swarm'); },
+    send_splitter: function (v, d, t, p, vol) { return bellows(v, d, t, p, vol, 'splitter'); },
     sendup: sendUpgrade,
     place: placeClink,
     upgrade: upgradeChime,
@@ -794,14 +836,19 @@
     kill_neutral: { minInterval: 0.022, maxVoices: 8, prio: 4, vary: 0.10 },
     kill_runner:  { minInterval: 0.022, maxVoices: 6, prio: 4, vary: 0.10 },
     kill_swarm:   { minInterval: 0.016, maxVoices: 10, prio: 3, vary: 0.12 },
-    kill_brute:   { minInterval: 0.040, maxVoices: 5, prio: 5, vary: 0.07 },
-    kill_boss:    { minInterval: 0.100, maxVoices: 3, prio: 7, vary: 0.04 },
+    kill_brute:    { minInterval: 0.040, maxVoices: 5, prio: 5, vary: 0.07 },
+    kill_splitter: { minInterval: 0.040, maxVoices: 5, prio: 5, vary: 0.07 },
+    kill_shard:    { minInterval: 0.055, maxVoices: 3, prio: 2, vary: 0.14 },
+    kill_boss:     { minInterval: 0.100, maxVoices: 3, prio: 7, vary: 0.04 },
+    split:         { minInterval: 0.060, maxVoices: 4, prio: 5, vary: 0.05 },
+    shot_smelter:  { minInterval: 0, maxVoices: 1, prio: 3, vary: 0 },
     leak:         { minInterval: 0.060, maxVoices: 4, prio: 9, vary: 0.03 },
     life_loss:    { minInterval: 0.080, maxVoices: 3, prio: 9, vary: 0.03 },
     send:         { minInterval: 0.080, maxVoices: 4, prio: 5, vary: 0.06 },
     send_runner:  { minInterval: 0.080, maxVoices: 4, prio: 5, vary: 0.06 },
     send_brute:   { minInterval: 0.100, maxVoices: 3, prio: 5, vary: 0.05 },
-    send_swarm:   { minInterval: 0.080, maxVoices: 4, prio: 5, vary: 0.08 },
+    send_swarm:    { minInterval: 0.080, maxVoices: 4, prio: 5, vary: 0.08 },
+    send_splitter: { minInterval: 0.090, maxVoices: 3, prio: 5, vary: 0.06 },
     sendup:       { minInterval: 0.120, maxVoices: 3, prio: 6, vary: 0.03 },
     place:        { minInterval: 0.060, maxVoices: 4, prio: 6, vary: 0.04 },
     upgrade:      { minInterval: 0.100, maxVoices: 3, prio: 6, vary: 0.02 },
@@ -1045,6 +1092,127 @@
   function toggleMusicMute() { return setMusicMuted(!musicMuted); }
   function isMusicMuted() { return !!musicMuted; }
 
+
+  // Smelter beam hiss: one sustained voice per board, refreshed by shot_smelter, released 250 ms after the last call.
+  var smelterV = Object.create(null), smelterHits = [];
+  function smelterKey(opts) {
+    var b = opts && opts.board;
+    return (b === 'L' || b === 'R') ? b : '*';
+  }
+  function smelterHeat(opts) {
+    var h = opts && (opts.h != null ? opts.h : (opts.heat != null ? opts.heat : opts.tier));
+    h = Number(h);
+    return isFinite(h) ? clamp(h, 0, 3) : 0;
+  }
+  function smelterCount() {
+    var n = 0, k;
+    for (k in smelterV) if (smelterV[k]) n++;
+    return n;
+  }
+  function smelterStats() {
+    var t = ctx ? ctx.currentTime : 0, maxH = 0, k, v, rate = 0;
+    for (k in smelterV) {
+      v = smelterV[k];
+      if (v && v.heat > maxH) maxH = v.heat;
+    }
+    if (ctx) {
+      while (smelterHits.length && smelterHits[0] < t - 1) smelterHits.shift();
+      rate = smelterHits.length;
+    }
+    return { voices: smelterCount(), heat: maxH, rate: rate };
+  }
+  function smelterActivity() {
+    var t = ctx.currentTime;
+    while (smelterHits.length && smelterHits[0] < t - 1) smelterHits.shift();
+    return { rate: smelterHits.length, boards: Math.max(1, smelterCount()) };
+  }
+  function smelterOpen(key, opts, t) {
+    if (!ctx || !master) return null;
+    var bus = ctx.createGain();
+    bus.gain.setValueAtTime(0.0001, t);
+    var pan = null, tail = bus;
+    if (ctx.createStereoPanner) {
+      pan = ctx.createStereoPanner();
+      pan.pan.setValueAtTime(parsePan(opts), t);
+      bus.connect(pan); pan.connect(master);
+    } else { bus.connect(master); }
+    var bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 0.85; bp.frequency.value = 800;
+    var lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 500;
+    var ns = ctx.createBufferSource();
+    ns.buffer = noiseBuffer('pink'); ns.loop = true;
+    var hissG = ctx.createGain(); hissG.gain.value = 0.7;
+    ns.connect(bp); bp.connect(hissG); hissG.connect(bus);
+    var roar = ctx.createOscillator();
+    roar.type = 'sine'; roar.frequency.value = 52;
+    var roarG = ctx.createGain(); roarG.gain.value = 0.45;
+    roar.connect(lp); lp.connect(roarG); roarG.connect(bus);
+    var hi = ctx.createBufferSource();
+    hi.buffer = noiseBuffer('white'); hi.loop = true;
+    var hp = ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 2200;
+    var hiG = ctx.createGain(); hiG.gain.value = 0;
+    hi.connect(hp); hp.connect(hiG); hiG.connect(bus);
+    try { ns.start(t); roar.start(t); hi.start(t); } catch (e) {}
+    var voice = { bus: bus, pan: pan, ns: ns, roar: roar, hi: hi, bp: bp, lp: lp, hiG: hiG, hissG: hissG, roarG: roarG, timer: 0, dying: false, heat: 0, panX: 0 };
+    smelterV[key] = voice;
+    return voice;
+  }
+  function smelterRetarget(voice, t) {
+    if (!voice || !ctx) return;
+    var cheap = stressed();
+    var hn = voice.heat / 3;
+    var act = smelterActivity();
+    var busy = clamp(act.rate / 24, 0, 1);
+    var g = (cheap ? 0.045 : 0.08) * (1 + 0.75 * hn) * (1 + 0.22 * busy + (act.boards > 1 ? 0.08 : 0));
+    try {
+      voice.bus.gain.setTargetAtTime(Math.max(0.0002, g), t, 0.06);
+      voice.bp.frequency.setTargetAtTime(700 + hn * 1400 + busy * 200, t, 0.08);
+      voice.lp.frequency.setTargetAtTime(380 + hn * 420, t, 0.08);
+      voice.roar.frequency.setTargetAtTime(48 + hn * 30 + busy * 6, t, 0.1);
+      voice.hiG.gain.setTargetAtTime(cheap ? 0 : (0.035 + hn * 0.055), t, 0.08);
+      if (voice.pan && voice.pan.pan) voice.pan.pan.setTargetAtTime(clamp(voice.panX, -1, 1), t, 0.08);
+    } catch (e) {}
+  }
+  function smelterApplyCheap() {
+    if (!ctx) return;
+    var t = ctx.currentTime, k;
+    for (k in smelterV) if (smelterV[k]) smelterRetarget(smelterV[k], t);
+  }
+  function smelterStop(key, voice) {
+    try { voice.ns.stop(); } catch (e1) {}
+    try { voice.roar.stop(); } catch (e2) {}
+    try { voice.hi.stop(); } catch (e3) {}
+    try { voice.bus.disconnect(); } catch (e4) {}
+    if (smelterV[key] === voice) delete smelterV[key];
+  }
+  function smelterRelease(key) {
+    var voice = smelterV[key], t;
+    if (!voice || !ctx) return;
+    voice.dying = true;
+    t = ctx.currentTime;
+    try { voice.bus.gain.setTargetAtTime(0.0001, t, 0.05); } catch (e) {}
+    voice.timer = later(function () {
+      if (smelterV[key] !== voice || !voice.dying) return;
+      smelterStop(key, voice);
+    }, 120);
+  }
+  function smelterTouch(opts) {
+    if (!ctx || !master) return;
+    var t = ctx.currentTime, key = smelterKey(opts), voice = smelterV[key];
+    smelterHits.push(t);
+    if (smelterHits.length > 80) smelterHits.splice(0, smelterHits.length - 48);
+    if (!voice) voice = smelterOpen(key, opts || {}, t);
+    if (!voice) return;
+    voice.dying = false;
+    voice.heat = smelterHeat(opts);
+    voice.panX = parsePan(opts);
+    smelterRetarget(voice, t);
+    if (voice.timer) cancelLater(voice.timer);
+    voice.timer = later(function () { smelterRelease(key); }, 250);
+  }
+
   function play(name, opts) {
     return safe(function () {
       opts = opts || {};
@@ -1055,6 +1223,7 @@
       name = resolveName(String(name || ''), opts);
       musicOnCue(name);
       if (muted || volume <= 0) return;
+      if (name === 'shot_smelter') { smelterTouch(opts); return; }
       var fn = SOUNDS[name];
       if (!fn) return;
       var meta = META[name] || { minInterval: 0.05, maxVoices: 4, prio: 3, vary: 0.05 };
@@ -1062,6 +1231,7 @@
       var important = prio >= 7;
       var hard = stressed();
       var mild = !hard && load > 25;
+      if (name === 'kill_shard' && (hard || mild)) return;
       if (name === 'hit' && hard) return;
       if (name === 'hit' && mild) { thinN++; if (thinN % 2 !== 0) return; }
       if (!important && (name.indexOf('shot_') === 0 || name.indexOf('kill') === 0)) {
@@ -1087,7 +1257,7 @@
       var t0 = ctx.currentTime + 0.005;
       var v = voiceBus(t0, parsePan(opts));
       var dur = 0.3;
-      try { dur = fn(v, v.dest, t0, pitch, vol) || 0.3; } catch (err) { try { v.stop(); } catch (e2) { /* ignore */ } return; }
+      try { dur = fn(v, v.dest, t0, pitch, vol, opts) || 0.3; } catch (err) { try { v.stop(); } catch (e2) { /* ignore */ } return; }
       register(name, prio, v, dur);
     });
   }
@@ -1121,6 +1291,7 @@
     return safe(function () {
       load = Math.max(0, Number(n) || 0);
       musicApplyCheap();
+      smelterApplyCheap();
       return load;
     });
   }
@@ -1139,7 +1310,8 @@
       load: load, tokens: +tokens.toFixed(2), nodes: nodeCount, rate: bucketRate(),
       emaMs: +emaMs.toFixed(1), lagging: lagging, cheap: stressed(),
       baseline: +baseline.toFixed(2), haveBase: haveBase,
-      music: musicStats()
+      music: musicStats(),
+      smelter: smelterStats()
     };
   }
   function resetStats() { nodeCount = 0; }
