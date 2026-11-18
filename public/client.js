@@ -12,33 +12,8 @@
   let buildType = null, selected = null, hover = null; // hover: {b,c,r,fx,fy}
   let overPainted = '';
 
-  function audApi() {
-    const a = (window.forgeAudio && typeof window.forgeAudio.play === 'function') ? window.forgeAudio
-      : (window.audio && typeof window.audio.play === 'function') ? window.audio : null;
-    return a && typeof a.getVolume === 'function' && typeof a.isMuted === 'function' ? a : (a && typeof a.play === 'function' ? a : null);
-  }
-  function aud(name, opts) { try { const a = audApi(); if (a && typeof a.play === 'function') a.play(name, opts); } catch (e) {} }
-  (function setupAudioUi() {
-    const muteBtn = $('muteBtn'), slider = $('volSlider');
-    if (!muteBtn || !slider) return;
-    const paint = () => {
-      try {
-        const a = audApi();
-        if (!a || typeof a.getVolume !== 'function' || typeof a.isMuted !== 'function') return;
-        slider.value = Math.round(a.getVolume() * 100);
-        muteBtn.textContent = a.isMuted() ? '🔇' : '🔊';
-        muteBtn.setAttribute('aria-pressed', a.isMuted() ? 'true' : 'false');
-      } catch (e) { /* foreign window.audio must never break the client */ }
-    };
-    const blurAud = () => { try { muteBtn.blur(); slider.blur(); } catch (e) {} };
-    muteBtn.onclick = () => { try { const a = audApi(); if (a) { if (a.unlock) a.unlock(); if (a.toggleMute) a.toggleMute(); } } catch (e) {} aud('ui_click'); paint(); blurAud(); };
-    slider.oninput = () => { try { const a = audApi(); if (a) { if (a.unlock) a.unlock(); if (a.setVolume) a.setVolume(+slider.value / 100); } } catch (e) {} paint(); };
-    muteBtn.addEventListener('pointerup', blurAud);
-    slider.addEventListener('pointerup', blurAud);
-    slider.addEventListener('change', blurAud);
-    slider.addEventListener('keyup', blurAud);
-    paint();
-  })();
+  // audio bridge and toasts live in public/client/audio-bridge.js and public/client/toast.js
+  const { aud, audApi, toast, toastHas } = window.FTD;
 
   // ---------- menu ----------
   $('name').value = localStorage.getItem('ftd_name') || '';
@@ -130,7 +105,7 @@
   $('startBtn').onclick = () => { aud('ui_click'); sendMsg({ t: 'start' }); };
   $('backBtn').onclick = () => { aud('ui_click'); sendMsg({ t: 'lobby' }); };
 
-  function show(id) { for (const s of ['menu', 'lobby', 'game']) $(s).classList.toggle('hidden', s !== id); }
+  function show(id) { for (const s of ['menu', 'lobby', 'game']) $(s).classList.toggle('hidden', s !== id); if (id === 'game') window.FTD.layout.fit(); }
   function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
   function renderLobby() {
@@ -398,8 +373,9 @@
   // ---------- input ----------
   const cv = $('cv'), ctx = cv.getContext('2d');
   function cellFromEvent(e) {
+    // screen px -> logical units: subtract the canvas border (clientLeft/Top) and divide by the content size
     const rect = cv.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (760 / rect.width), y = (e.clientY - rect.top) * (660 / rect.height);
+    const x = (e.clientX - rect.left - cv.clientLeft) * (760 / (cv.clientWidth || 760)), y = (e.clientY - rect.top - cv.clientTop) * (660 / (cv.clientHeight || 660));
     for (const b of ['L', 'R']) {
       const fxp = (x - BX[b]) / CELL, fyp = (y - TOP) / CELL;
       if (fxp >= 0 && fyp >= 0 && fxp < S.COLS && fyp < S.ROWS) return { b, c: Math.floor(fxp), r: Math.floor(fyp), fx: fxp, fy: fyp };
@@ -450,33 +426,6 @@
     $('chatLog').appendChild(d); $('chatLog').scrollTop = 1e9;
   }
 
-  // toast queue: messages are shown one after another instead of overwriting each other.
-  // A toast with a key replaces a queued (or showing) toast with the same key, so bursts (e.g. enemy sends) coalesce.
-  const toastQ = []; let toastCur = null, toastTimer = null;
-  // urgent (errors): queued ahead of info toasts, and an info toast that is showing is cut short for it
-  function toast(msg, info, key, urgent) {
-    const item = { msg, info: !!info, key: key || null, urgent: !!urgent };
-    if (key) {
-      if (toastCur && toastCur.key === key) { toastCur.msg = msg; paintToast(); return; }
-      const i = toastQ.findIndex((x) => x.key === key); if (i >= 0) { toastQ[i] = item; return; }
-    }
-    if (toastQ.length >= 4) { const i = toastQ.findIndex((x) => x.info); toastQ.splice(i >= 0 ? i : 0, 1); } // keep it short
-    if (urgent) { const i = toastQ.findIndex((x) => !x.urgent); toastQ.splice(i >= 0 ? i : toastQ.length, 0, item); }
-    else toastQ.push(item);
-    if (!toastCur) nextToast();
-    else if (urgent && toastCur.info) { clearTimeout(toastTimer); toastTimer = setTimeout(nextToast, Math.max(0, 350 - (performance.now() - toastCur.at))); }
-  }
-  function toastHas(key) { return (toastCur && toastCur.key === key) || toastQ.some((x) => x.key === key); }
-  function paintToast() { const t = $('toast'); t.textContent = toastCur.msg; t.className = 'show' + (toastCur.info ? ' info' : ''); }
-  function nextToast() {
-    clearTimeout(toastTimer);
-    toastCur = toastQ.shift() || null;
-    if (!toastCur) { $('toast').className = ''; return; }
-    toastCur.at = performance.now();
-    paintToast();
-    toastTimer = setTimeout(nextToast, toastQ.length ? 1100 : 1800);
-  }
-  window.__ftdToasts = () => ({ cur: toastCur && toastCur.msg, queued: toastQ.map((x) => x.msg) }); // read-only hook for the smoke test
 
   // ---------- rendering ----------
   // Static layers (grass, path, frame, portal, castle, tower pads, team header and names) are cached per board
@@ -485,9 +434,14 @@
   const AR = window.ART;
   const W = 760, H = 660, BW = S.COLS * CELL, BH = S.ROWS * CELL, PADX = 12;
   let dpr = 1;
+  // v0.6 screen fit: everything is drawn in logical W x H units; public/client/layout.js picks the on-screen scale.
+  // dpr here is the backing-store pixels per logical unit (devicePixelRatio x screen scale, capped at 3 for fill-rate),
+  // so cached boards and sprites stay sharp at any size. Input is mapped back with cellFromEvent.
   function setupCanvas() {
-    dpr = Math.min(2, window.devicePixelRatio || 1);
-    cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    const sc = (window.FTD.layout && window.FTD.layout.scale) || 1;
+    dpr = Math.min(3, Math.max(0.5, (window.devicePixelRatio || 1) * sc));
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    cv.style.width = Math.round(W * sc) + 'px'; cv.style.height = Math.round(H * sc) + 'px';
     for (const b of ['L', 'R']) boardCache[b].ref = null;
   }
   const boardCache = { L: { cv: document.createElement('canvas'), ref: null, d: null }, R: { cv: document.createElement('canvas'), ref: null, d: null } };
@@ -835,7 +789,7 @@
     const dt = performance.now() - t0; frameStats.n++; frameStats.total += dt; if (dt > frameStats.max) frameStats.max = dt;
   }
   setupCanvas();
-  window.addEventListener('resize', () => { if (Math.min(2, window.devicePixelRatio || 1) !== dpr) setupCanvas(); });
+  window.FTD.layout.onChange(setupCanvas); // window resize, fullscreen, zoom/DPR change, panel or banner size change
   requestAnimationFrame(render);
 
   // ---------- menu art: a little animated scene drawn with the game's own sprites ----------

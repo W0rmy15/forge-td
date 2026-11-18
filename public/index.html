@@ -65,7 +65,7 @@
       <div id="roster"></div>
       <div id="chatLog"></div>
       <input id="chatInput" placeholder="Enter to chat" maxlength="120">
-      <p class="hint">Keys: 1/2/3 tower · Q/W/E send · Shift+Q/W/E upgrade send · U upgrade tower · X twice to sell (queued while creeps are on your board) · Esc cancel</p>
+      <p class="hint">Keys: 1/2/3 tower · Q/W/E send · Shift+Q/W/E upgrade send · U upgrade tower · X twice to sell (queued while creeps are on your board) · Esc cancel · F fullscreen</p>
     </div>
   </div>
   <div id="over" class="overlay hidden"><div class="card"><canvas id="overArt" width="420" height="130"></canvas><h1 id="overText"></h1><p id="overReason" class="hint"></p><div id="overStats"></div><button id="backBtn" class="big go hidden">Back to lobby</button><p id="overWait" class="hint">Waiting for host…</p></div></div>
@@ -74,6 +74,9 @@
 <script src="shared.js"></script>
 <script src="art.js"></script>
 <script src="audio.js"></script>
+<script src="client/audio-bridge.js"></script>
+<script src="client/toast.js"></script>
+<script src="client/layout.js"></script>
 <script src="client.js"></script>
 </body>
 </html>

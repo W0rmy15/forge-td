@@ -30,7 +30,9 @@ let fails = 0; const check = (n, ok, info) => { console.log(`${ok ? 'PASS' : 'FA
   await sleep(800);
   check('game screen shown for both', true);
   // build: key 1 then click cell (2,5) on left board: x = 20 + 2*30 + 15, y = 44 + 5*30 + 15
-  const cv = await A.$('#cv'); const box = await cv.boundingBox();
+  // canvas content box in page px (v0.6: the canvas is scaled to fit the window, and has a border)
+  const box = await A.$eval('#cv', (e) => { const r = e.getBoundingClientRect(); return { x: r.left + e.clientLeft, y: r.top + e.clientTop, width: e.clientWidth, height: e.clientHeight }; });
+  check('v0.6: board scaled up to fill a 1100x760 window', box.height > 660 * 1.0 && box.height <= 760, box);
   const cell = (c, r) => ({ x: box.x + (20 + c * 30 + 15) * box.width / 760, y: box.y + (44 + r * 30 + 15) * box.height / 660 });
   await A.keyboard.press('1'); const p = cell(2, 5); await A.mouse.move(p.x, p.y); await A.mouse.click(p.x, p.y); await sleep(400);
   const gold1 = +(await A.$eval('#gold', (e) => e.textContent));
@@ -115,6 +117,18 @@ let fails = 0; const check = (n, ok, info) => { console.log(`${ok ? 'PASS' : 'FA
       const ct = await B.evaluate(async () => { for (let i = 0; i < 60; i++) { const c = window.__ftdState().boards.R.creeps.find((c) => c[1] === 'runner' && c[8] === 1); if (c) return c[8]; await new Promise((r) => setTimeout(r, 100)); } return null; });
       check('tier-1 runner spawns on the enemy board', ct === 1, ct);
     } }
+  // v0.6 screen fit: resize the window, the board follows, and clicks still land on the right cell
+  for (const [vw, vh, c, r] of [[1600, 1000, 4, 8], [900, 600, 6, 10]]) {
+    await A.setViewport({ width: vw, height: vh }); await sleep(400);
+    const bx = await A.$eval('#cv', (e) => { const q = e.getBoundingClientRect(); return { x: q.left + e.clientLeft, y: q.top + e.clientTop, width: e.clientWidth, height: e.clientHeight, bs: e.width }; });
+    const pt = { x: bx.x + (20 + c * 30 + 15) * bx.width / 760, y: bx.y + (44 + r * 30 + 15) * bx.height / 660 };
+    await A.keyboard.press('1'); await A.mouse.move(pt.x, pt.y); await A.mouse.click(pt.x, pt.y); await sleep(500);
+    const hit = await A.evaluate((c, r) => window.__ftdState().boards.L.towers.some((t) => t[1] === c && t[2] === r), c, r);
+    const fits = bx.y + bx.height <= vh && bx.width / 760 > (vw === 1600 ? 1.2 : 0.5);
+    check(`v0.6: ${vw}x${vh} window: board ${Math.round(bx.width)}x${Math.round(bx.height)} fits, click builds at (${c},${r})`, fits && hit, { bx, hit });
+    await A.keyboard.press('Escape');
+  }
+  await A.setViewport({ width: 1100, height: 760 }); await sleep(300);
   await A.screenshot({ path: require('path').join(require('os').tmpdir(), 'forge-smoke.png') });
   // room-not-found: page with stale token for a missing room goes back to the menu
   const C = await mk(); await C.goto(URL_); await C.evaluate(() => localStorage.setItem('ftd_token_ZZZZ', 'x'));
